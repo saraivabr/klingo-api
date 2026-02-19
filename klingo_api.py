@@ -57,9 +57,13 @@ class PacientesModule(_BaseModule):
         parms = {"search": search, "page": page, **filtros}
         return self._aql("pacientes.index", parms, "lista", action="pacientes.index")
 
-    def detalhar(self, id_paciente: int) -> dict:
-        """Obtém detalhes completos de um paciente."""
-        return self._aql("pacientes.show", {"id": id_paciente}, "item", action="pacientes.show")
+    def detalhar(self, id_pessoa: int) -> dict:
+        """Obtém detalhes completos de um paciente.
+
+        Args:
+            id_pessoa: ID da pessoa (campo id_pessoa retornado na busca)
+        """
+        return self._aql("pacientes.show", {"id": id_pessoa}, "item", action="pacientes.show")
 
     def criar(self, dados: dict) -> dict:
         """Cria um novo paciente.
@@ -70,14 +74,26 @@ class PacientesModule(_BaseModule):
         """
         return self._aql("pacientes.store", dados, "item", action="pacientes.store")
 
-    def atualizar(self, id_paciente: int, dados: dict) -> dict:
-        """Atualiza dados de um paciente existente."""
-        dados["id"] = id_paciente
+    def atualizar(self, id_pessoa: int, dados: dict) -> dict:
+        """Atualiza dados de um paciente existente.
+
+        Args:
+            id_pessoa: ID da pessoa (campo id_pessoa retornado na busca)
+        """
+        dados["id"] = id_pessoa
         return self._aql("pacientes.store", dados, "item", action="pacientes.store")
 
-    def retornos(self, id_paciente: int) -> dict:
-        """Lista retornos de um paciente."""
-        return self._aql("pacientes.retornos", {"id_paciente": id_paciente}, "item")
+    def retornos(self, id_pessoa: int) -> dict:
+        """Lista retornos de um paciente.
+
+        Args:
+            id_pessoa: ID da pessoa (campo id_pessoa retornado na busca)
+        """
+        return self._aql("pacientes.retornos", {"id_paciente": id_pessoa}, "lista")
+
+    def etnias(self) -> dict:
+        """Lista etnias disponíveis para cadastro de pacientes."""
+        return self._aql("pacientes.etnias", {}, "lista")
 
 
 # ============================================================================
@@ -140,11 +156,20 @@ class AgendasModule(_BaseModule):
         """Cria agendamento recorrente."""
         return self._aql("agendas.store", dados, "item", action="agendas.recorrencia")
 
-    def horarios_medico(self, id_medico: int, data: str = None) -> dict:
-        """Obtém horários disponíveis de um médico."""
+    def horarios_medico(self, id_medico: int, data: str = None, id_procedimento: int = None) -> dict:
+        """Obtém horários disponíveis de um médico.
+
+        Args:
+            id_medico: ID da pessoa do médico (campo id_pessoa)
+            data: Data no formato YYYY-MM-DD (padrão: hoje)
+            id_procedimento: ID do procedimento (obrigatório pela API)
+        """
         if data is None:
             data = date.today().isoformat()
-        return self._aql("medicos.horarios", {"id_medico": id_medico, "data": data}, "item")
+        parms = {"id_medico": id_medico, "data": data}
+        if id_procedimento:
+            parms["id_procedimento"] = id_procedimento
+        return self._aql("medicos.horarios", parms, "item")
 
 
 # ============================================================================
@@ -158,13 +183,33 @@ class MarcacoesModule(_BaseModule):
         return self._aql("marcacoes.stats", {"para_marcacao": para_marcacao}, "lista",
                          action="marcacoes.stats")
 
-    def listar(self, **filtros) -> dict:
-        """Lista marcações com filtros."""
-        return self._aql("marcacoes.index", filtros, "lista")
+    def listar(self, id_paciente: int, **filtros) -> dict:
+        """Lista marcações de um paciente.
+
+        Args:
+            id_paciente: ID da pessoa do paciente (obrigatório)
+        """
+        return self._aql("marcacoes.index", {"id_paciente": id_paciente, **filtros}, "lista")
 
     def detalhar(self, id_marcacao: int) -> dict:
-        """Obtém detalhes de uma marcação."""
+        """Obtém detalhes de uma marcação.
+
+        Args:
+            id_marcacao: ID da marcação (campo id_marcacao)
+        """
         return self._aql("marcacoes.show", {"id": id_marcacao}, "item", action="marcacoes.show")
+
+    def detalhar_completo(self, id_marcacao: int, guia_tiss: bool = False,
+                          foto: bool = True) -> dict:
+        """Obtém marcação com dados completos (atendimento, procedimentos, pagamento).
+
+        Útil para carregar dados clínicos (anamnese, receitas, requisições, laudos).
+        """
+        return self._aql("marcacoes.show", {
+            "id": id_marcacao, "para_atendimento": True,
+            "lancamento_procedimento": True, "foto": foto,
+            "buscar_outras": True, "guia_tiss": guia_tiss
+        }, "item", action="marcacoes.show")
 
     def iniciar(self, id_marcacao: int) -> dict:
         """Inicia uma marcação (check-in)."""
@@ -213,11 +258,20 @@ class MedicosModule(_BaseModule):
         parms = {"ativos": ativos, **filtros}
         return self._aql("medicos.index", parms, "lista", action="medicos.index")
 
-    def horarios(self, id_medico: int, data: str = None) -> dict:
-        """Obtém horários de um médico."""
+    def horarios(self, id_medico: int, data: str = None, id_procedimento: int = None) -> dict:
+        """Obtém horários de um médico.
+
+        Args:
+            id_medico: ID da pessoa do médico (campo id_pessoa)
+            data: Data no formato YYYY-MM-DD (padrão: hoje)
+            id_procedimento: ID do procedimento (obrigatório pela API)
+        """
         if data is None:
             data = date.today().isoformat()
-        return self._aql("medicos.horarios", {"id_medico": id_medico, "data": data}, "item")
+        parms = {"id_medico": id_medico, "data": data}
+        if id_procedimento:
+            parms["id_procedimento"] = id_procedimento
+        return self._aql("medicos.horarios", parms, "item")
 
 
 # ============================================================================
@@ -243,12 +297,12 @@ class OperadorasModule(_BaseModule):
         return self._aql("operadoras.index", filtros, "lista", action="operadoras.index")
 
     def detalhar(self, id_operadora: int) -> dict:
-        """Obtém detalhes de uma operadora."""
-        return self._aql("operadoras.show", {"id": id_operadora}, "item")
+        """Obtém detalhes de uma operadora.
 
-    def config(self) -> dict:
-        """Obtém configurações das operadoras."""
-        return self._aql("operadoras.config", {}, "item")
+        Args:
+            id_operadora: ID da operadora (campo id_operadora da listagem)
+        """
+        return self._aql("operadoras.show", {"id": id_operadora}, "item", action="operadoras.show")
 
 
 # ============================================================================
@@ -358,10 +412,22 @@ class SuprimentosModule(_BaseModule):
 class LaudosModule(_BaseModule):
     """Gerenciamento de laudos."""
 
+    def listar(self, page: int = 1) -> dict:
+        """Lista laudos (paginado)."""
+        return self._aql("laudos.index", {"page": page}, "lista", page=page)
+
+    def detalhar(self, id_laudo: int) -> dict:
+        """Obtém detalhes de um laudo."""
+        return self._aql("laudos.show", {"id": id_laudo}, "item")
+
     def filas(self, todas: bool = True) -> dict:
         """Lista filas de laudos."""
         return self._aql("fila_laudos.index", {"todas": todas}, "item",
                          action="fila_laudos.index")
+
+    def fila_detalhar(self, id_fila: int) -> dict:
+        """Obtém detalhes de uma fila de laudos."""
+        return self._aql("fila_laudos.show", {"id": id_fila}, "fila")
 
     def status_laudos(self) -> dict:
         """Lista status possíveis de laudos."""
@@ -378,6 +444,10 @@ class AutorizacoesModule(_BaseModule):
         """Lista filas de autorização."""
         return self._aql("fila_autorizacoes.index", {}, "lista",
                          action="fila_autorizacoes.index")
+
+    def solicitacoes(self) -> dict:
+        """Lista solicitações de autorização."""
+        return self._aql("solicitacao_autorizacoes.index", {}, "lista")
 
 
 # ============================================================================
@@ -433,9 +503,16 @@ class PEPModule(_BaseModule):
         """Carrega o PEP de um atendimento."""
         return self._aql("pep.load", {"id_atendimento": id_atendimento}, "item", action="pep.load")
 
-    def historico(self, id_paciente: int, tipo: str = "") -> dict:
-        """Obtém histórico do PEP."""
-        return self._aql(f"pep.historico_{tipo}", {"id_paciente": id_paciente}, "item")
+    def historico(self, id_paciente: int, tipo: str = None) -> dict:
+        """Obtém histórico do PEP.
+
+        Args:
+            id_paciente: ID da pessoa do paciente (id_pessoa)
+            tipo: Tipo de histórico (ex: 'atendimentos', 'exames'). Se None, usa endpoint genérico.
+        """
+        if tipo:
+            return self._aql(f"pep.historico_{tipo}", {"id_paciente": id_paciente}, "item")
+        return self._aql("pep.historico", {"id_paciente": id_paciente}, "item")
 
     def avulsos(self, id_paciente: int) -> dict:
         """Lista atendimentos avulsos do PEP."""
@@ -445,9 +522,13 @@ class PEPModule(_BaseModule):
         """Verifica se pode criar atendimento avulso."""
         return self._aql("pep.pode_avulso", {}, "item")
 
-    def salvar_order_set(self, dados: dict) -> dict:
-        """Salva um order set no PEP."""
-        return self._aql("pep.salvar_order_set", dados, "item")
+    def legado(self, id_paciente: int) -> dict:
+        """Obtém registros legados do PEP de um paciente."""
+        return self._aql("pep.legado", {"id_paciente": id_paciente}, "legado")
+
+    def cancelar(self, id_atendimento: int) -> dict:
+        """Cancela um registro PEP."""
+        return self._aql("pep.cancelar", {"id_atendimento": id_atendimento}, "item")
 
 
 # ============================================================================
@@ -475,12 +556,20 @@ class ConfiguracoesModule(_BaseModule):
 class UsuariosModule(_BaseModule):
     """Gerenciamento de usuários e permissões."""
 
-    def tem_permissao(self, resource: str) -> dict:
-        """Verifica se o usuário tem permissão."""
-        return self._aql("usuarios.tem_permissao", {"resource": resource}, "item")
+    def tem_permissao(self, id_acao: int) -> dict:
+        """Verifica se o usuário tem permissão para uma ação.
+
+        Args:
+            id_acao: ID numérico da ação
+        """
+        return self._aql("usuarios.tem_permissao", {"id_acao": id_acao}, "item")
 
     def tem_permissao_acesso(self, resource_id: int) -> dict:
-        """Verifica permissão de acesso a um recurso."""
+        """Verifica permissão de acesso a um recurso.
+
+        Args:
+            resource_id: ID numérico do recurso
+        """
         return self._aql("usuarios.tem_permissao_acesso",
                          {"resource_id": resource_id, "block_vazio": True}, "item")
 
@@ -535,7 +624,8 @@ class CadastrosModule(_BaseModule):
 
     def buscar_procedimento(self, search: str) -> dict:
         """Busca procedimento por nome/código."""
-        return self._aql("procedimento.search", {"search": search}, "lista")
+        return self._aql("procedimentos.index", {"search": search}, "lista",
+                         action="procedimentos.index")
 
     def materiais(self, search: str = "") -> dict:
         """Lista materiais."""
@@ -551,7 +641,7 @@ class CadastrosModule(_BaseModule):
 
     def buscar_plano(self, search: str) -> dict:
         """Busca plano por nome."""
-        return self._aql("plano.search", {"search": search}, "lista")
+        return self._aql("planos.index", {"search": search}, "lista")
 
     def modelos(self) -> dict:
         """Lista modelos de documentos."""
@@ -565,11 +655,227 @@ class CadastrosModule(_BaseModule):
 
     def unidades(self) -> dict:
         """Lista unidades."""
-        return self._aql("unidades.lista", {}, "lista")
+        return self._aql("unidades.index", {}, "lista")
+
+    def unidades_operacao(self) -> dict:
+        """Lista unidades de operação."""
+        return self._aql("unidade_operacaos.index", {}, "lista")
 
     def locais(self) -> dict:
         """Lista locais de atendimento."""
         return self._aql("locals.index", {}, "lista")
+
+    def tipo_logradouros(self) -> dict:
+        """Lista tipos de logradouro."""
+        return self._aql("tipo_logradouros.index", {}, "lista")
+
+    def procedimento_grupos(self) -> dict:
+        """Lista grupos de procedimento."""
+        return self._aql("procedimento_grupos.index", {}, "lista")
+
+
+# ============================================================================
+# MÓDULO: ATENDIMENTO - DETALHES (Instruções, Lista Espera, etc)
+# ============================================================================
+class AtendimentoDetalhesModule(_BaseModule):
+    """Detalhes complementares de atendimentos."""
+
+    def instrucoes_plano(self, id_plano: int, id_paciente: int = None,
+                         id_unidade_operacao: int = None) -> dict:
+        """Obtém instruções de um plano/convênio."""
+        parms = {"id_plano": id_plano}
+        if id_paciente:
+            parms["id_paciente"] = id_paciente
+        if id_unidade_operacao:
+            parms["id_unidade_operacao"] = id_unidade_operacao
+        return self._aql("instrucoes.show", parms, "plano", action="instrucoes.show")
+
+    def instrucoes_procedimento(self, id_plano: int, id_procedimento: int,
+                                id_paciente: int = None, id_medico: int = None) -> dict:
+        """Obtém instruções de um procedimento dentro de um plano."""
+        parms = {"id_plano": id_plano, "id_procedimento": id_procedimento}
+        if id_paciente:
+            parms["id_paciente"] = id_paciente
+        if id_medico:
+            parms["id_medico"] = id_medico
+        return self._aql("instrucoes.show", parms, "proced", action="instrucoes.show")
+
+    def lista_espera(self) -> dict:
+        """Lista pacientes na lista de espera."""
+        return self._aql("lista_esperas.index", {}, "lista")
+
+    def tipo_atendimentos(self) -> dict:
+        """Lista tipos de atendimento."""
+        return self._aql("tipo_atendimentos.index", {}, "lista")
+
+    def recepcoes(self) -> dict:
+        """Lista recepções."""
+        return self._aql("recepcaos.index", {}, "lista")
+
+    def textos_padrao(self) -> dict:
+        """Lista textos padrão."""
+        return self._aql("textos_padrao.index", {}, "lista")
+
+    def resultados(self) -> dict:
+        """Lista resultados."""
+        return self._aql("resultados.index", {}, "lista")
+
+    def observacao_tipos(self) -> dict:
+        """Lista tipos de observação."""
+        return self._aql("observacao_tipos.index", {}, "lista")
+
+    def contato_status(self) -> dict:
+        """Lista status de contato."""
+        return self._aql("contato_status.index", {}, "lista")
+
+    def desconto_tipos(self) -> dict:
+        """Lista tipos de desconto."""
+        return self._aql("desconto_tipos.index", {}, "lista")
+
+    def centro_cirurgicos(self) -> dict:
+        """Lista centros cirúrgicos."""
+        return self._aql("centro_cirurgicos.index", {}, "lista")
+
+
+# ============================================================================
+# MÓDULO: MÉDICOS - DETALHES (Unidades, Procedimentos, Solicitantes)
+# ============================================================================
+class MedicosDetalhesModule(_BaseModule):
+    """Detalhes complementares de médicos."""
+
+    def unidades(self) -> dict:
+        """Lista médicos por unidade."""
+        return self._aql("medico_unidades.index", {}, "lista")
+
+    def procedimento_unidades(self) -> dict:
+        """Lista procedimentos por médico/unidade."""
+        return self._aql("medico_procedimento_unidades.index", {}, "lista")
+
+    def solicitantes(self) -> dict:
+        """Lista médicos solicitantes."""
+        return self._aql("medico_solicitantes.index", {}, "lista")
+
+
+# ============================================================================
+# MÓDULO: TABELAS DE REFERÊNCIA (Brasíndice, SIMPRO, TUSS, etc)
+# ============================================================================
+class TabelasReferenciaModule(_BaseModule):
+    """Tabelas de referência para faturamento e precificação."""
+
+    def brasindices(self) -> dict:
+        """Lista itens da tabela Brasíndice."""
+        return self._aql("brasindices.index", {}, "lista")
+
+    def simpros(self) -> dict:
+        """Lista itens da tabela SIMPRO."""
+        return self._aql("simpros.index", {}, "lista")
+
+    def codigo_tabelas(self) -> dict:
+        """Lista códigos de tabela."""
+        return self._aql("codigo_tabelas.index", {}, "lista")
+
+    def codigo_despesa(self) -> dict:
+        """Lista códigos de despesa."""
+        return self._aql("codigo_despesa.index", {}, "lista")
+
+    def grau_participacoes(self) -> dict:
+        """Lista graus de participação."""
+        return self._aql("grau_participacoes.index", {}, "lista")
+
+    def taxas(self) -> dict:
+        """Lista taxas."""
+        return self._aql("taxas.index", {}, "lista")
+
+    def moedas(self) -> dict:
+        """Lista moedas."""
+        return self._aql("moedas.index", {}, "lista")
+
+    def motivos_glosa(self, internos: bool = None) -> dict:
+        """Lista motivos de glosa.
+
+        Args:
+            internos: True=internos, False=externos, None=todos
+        """
+        parms = {}
+        if internos is not None:
+            parms["where"] = {"fl_interno": 1 if internos else 0}
+        return self._aql("motivos_glosa.index", parms, "lista")
+
+    def unidade_medidas(self) -> dict:
+        """Lista unidades de medida."""
+        return self._aql("unidade_medidas.index", {}, "lista")
+
+
+# ============================================================================
+# MÓDULO: ESTOQUE - DETALHES (Grupos, Itens, Lotes, Consumo)
+# ============================================================================
+class EstoqueDetalhesModule(_BaseModule):
+    """Detalhes complementares de estoque."""
+
+    def grupos(self) -> dict:
+        """Lista grupos de estoque."""
+        return self._aql("estoque_grupos.index", {}, "lista")
+
+    def itens(self, **filtros) -> dict:
+        """Lista itens de estoque."""
+        return self._aql("estoque_items.index", filtros, "lista")
+
+    def lotes(self) -> dict:
+        """Lista lotes de estoque."""
+        return self._aql("estoque_lotes.index", {}, "lista")
+
+    def consumo(self) -> dict:
+        """Lista itens de consumo."""
+        return self._aql("consumo.index", {}, "lista")
+
+    def ident_paciente_consumo(self, data: str, unidade: int = 1,
+                                devolucao: int = 0) -> dict:
+        """Identifica pacientes com consumo."""
+        return self._aql("estoque.ident_paciente_consumo",
+                         {"data": data, "unidade": unidade, "devolucao": devolucao}, "item")
+
+    def tipo_etiqueta_amostras(self) -> dict:
+        """Lista tipos de etiqueta de amostra."""
+        return self._aql("tipo_etiqueta_amostras.index", {}, "lista")
+
+    def rota_etiquetas(self) -> dict:
+        """Lista rotas de etiquetas."""
+        return self._aql("rota_etqs.index", {}, "lista")
+
+
+# ============================================================================
+# MÓDULO: SUS
+# ============================================================================
+class SUSModule(_BaseModule):
+    """Endpoints específicos do SUS."""
+
+    def motivo_saidas(self) -> dict:
+        """Lista motivos de saída SUS."""
+        return self._aql("sus.motivo_saidas", {}, "lista")
+
+
+# ============================================================================
+# MÓDULO: OPERADORAS - DETALHES
+# ============================================================================
+class OperadorasDetalhesModule(_BaseModule):
+    """Detalhes complementares de operadoras."""
+
+    def verificar_unificar_guias(self, id_operadora: int) -> dict:
+        """Verifica se pode unificar guias de uma operadora."""
+        return self._aql("operadoras.verificar_unificar_guias",
+                         {"id_operadora": id_operadora}, "item")
+
+    def bandeira_cartoes(self) -> dict:
+        """Lista bandeiras de cartão."""
+        return self._aql("bandeira_cartaos.index", {}, "lista")
+
+    def apoiados(self) -> dict:
+        """Lista apoiados."""
+        return self._aql("apoiados.index", {}, "lista")
+
+    def apoiado_origens(self) -> dict:
+        """Lista origens de apoiados."""
+        return self._aql("apoiado_origens.index", {}, "lista")
 
 
 # ============================================================================
@@ -583,6 +889,10 @@ class TarefasModule(_BaseModule):
         return self._aql("tarefas.index",
                          {"pendentes": pendentes, "minhas": minhas, "id_medico": None}, "item",
                          action="tarefas.index")
+
+    def grupos(self) -> dict:
+        """Lista grupos de tarefas."""
+        return self._aql("tarefa_grupos.index", {}, "lista")
 
 
 # ============================================================================
@@ -641,6 +951,12 @@ class KlingoAPI:
         self.usuarios = UsuariosModule(self)
         self.cadastros = CadastrosModule(self)
         self.tarefas = TarefasModule(self)
+        self.atendimento_detalhes = AtendimentoDetalhesModule(self)
+        self.medicos_detalhes = MedicosDetalhesModule(self)
+        self.tabelas_referencia = TabelasReferenciaModule(self)
+        self.estoque_detalhes = EstoqueDetalhesModule(self)
+        self.sus = SUSModule(self)
+        self.operadoras_detalhes = OperadorasDetalhesModule(self)
 
     def login(self, usuario: str, senha: str) -> dict:
         """
@@ -721,6 +1037,16 @@ class KlingoAPI:
 
         data = response.json()
 
+        # Detectar erros que vêm com HTTP 200 mas com status/error no body
+        if isinstance(data, dict) and "status" in data and "error" in data:
+            status = data["status"]
+            if isinstance(status, int) and status >= 400 or isinstance(status, str) and status.isdigit() and int(status) >= 400:
+                raise KlingoAPIError(
+                    f"Erro AQL ({name}): {data['error']}",
+                    status_code=int(status) if isinstance(status, str) else status,
+                    response=data
+                )
+
         # Extrair resultado pelo alias
         if id_alias in data:
             result = data[id_alias]
@@ -797,7 +1123,11 @@ class KlingoAPI:
         return response.content
 
     def modulos_acesso(self) -> dict:
-        """Lista módulos que o usuário tem acesso."""
+        """Lista módulos que o usuário tem acesso.
+
+        Nota: Este endpoint pode não estar disponível na API.
+        Use aql_raw() para descobrir endpoints de módulos.
+        """
         return self._aql("modulos.acesso", {}, "item")
 
 
@@ -828,15 +1158,15 @@ if __name__ == "__main__":
     agendas = api.agendas.listar()
     print(f"\nAgendas de hoje carregadas com sucesso")
 
-    # Buscar operadoras
+    # Buscar operadoras (campo PK é id_operadora)
     operadoras = api.operadoras.listar()
     print(f"\nOperadoras: {len(operadoras)} encontradas")
     for op in operadoras[:5]:
-        print(f"  - {op['st_operadora']}")
+        print(f"  - {op['st_operadora']} (id={op['id_operadora']})")
 
     # Multi-query (buscar várias coisas de uma vez)
     results = api._aql_multi([
-        {"name": "formas_pagamento.index", "id": "formas"},
+        {"name": "forma_pagamentos.index", "id": "formas"},
         {"name": "sinalizadores.index", "id": "sinalizadores", "parms": {"ativos": True}},
     ])
     print(f"\nMulti-query executada com sucesso")
