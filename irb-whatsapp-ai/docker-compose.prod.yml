@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: irb-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    container_name: irb-mongo
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: irb-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: irb-api
+    restart: always
+    ports:
+      - '127.0.0.1:3001:3001'
+    environment:
+      - NODE_ENV=production
+      - API_PORT=3001
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - MONGO_URI=mongodb://mongo:27017/irb_whatsapp
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET}
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_TOKEN=${UAZAPI_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - KLINGO_LOGIN=${KLINGO_LOGIN}
+      - KLINGO_SENHA=${KLINGO_SENHA}
+      - KLINGO_DOMAIN=${KLINGO_DOMAIN:-irb}
+      - IGS_BASE_URL=${IGS_BASE_URL:-https://prdapolobr.igs.teknosgroup.com/api-apolo/v1}
+      - IGS_SERVICE=${IGS_SERVICE}
+      - IGS_AUTH_KEY=${IGS_AUTH_KEY}
+      - IGS_USERNAME=${IGS_USERNAME}
+      - IGS_PASSWORD=${IGS_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    container_name: irb-worker
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - MONGO_URI=mongodb://mongo:27017/irb_whatsapp
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - UAZAPI_URL=${UAZAPI_URL}
+      - UAZAPI_TOKEN=${UAZAPI_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BOOKING_BASE_URL=https://irb.saraiva.ai/agendar
+      - KLINGO_LOGIN=${KLINGO_LOGIN}
+      - KLINGO_SENHA=${KLINGO_SENHA}
+      - KLINGO_DOMAIN=${KLINGO_DOMAIN:-irb}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.dashboard
+    container_name: irb-dashboard
+    restart: always
+    ports:
+      - '8090:80'
+    depends_on:
+      - api
+
+  bullboard:
+    image: deadly0/bull-board
+    container_name: irb-bullboard
+    restart: always
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - '3100:3000'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
