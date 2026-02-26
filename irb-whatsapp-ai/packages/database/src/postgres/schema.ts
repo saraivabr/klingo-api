@@ -20,6 +20,7 @@ export const patients = pgTable('patients', {
   cpfHash: varchar('cpf_hash', { length: 64 }),
   birthDate: date('birth_date'),
   source: varchar('source', { length: 50 }),
+  klingoPatientId: integer('klingo_patient_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
@@ -66,6 +67,8 @@ export const appointments = pgTable('appointments', {
   klingoSyncStatus: varchar('klingo_sync_status', { length: 20 }).default('pending'),
   klingoSyncError: text('klingo_sync_error'),
   klingoSyncAttempts: integer('klingo_sync_attempts').default(0),
+  klingoVoucherId: integer('klingo_voucher_id'),
+  klingoReservationId: varchar('klingo_reservation_id', { length: 50 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 

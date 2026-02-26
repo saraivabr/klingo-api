@@ -1,14 +1,7 @@
 import OpenAI from 'openai';
 
-// OpenRouter configuration - compatible with OpenAI SDK
 const openai = new OpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY,
-  baseURL: process.env.OPENROUTER_API_KEY 
-    ? 'https://openrouter.ai/api/v1' 
-    : undefined,
-  defaultHeaders: process.env.OPENROUTER_API_KEY 
-    ? { 'HTTP-Referer': 'https://irb.saraiva.ai', 'X-Title': 'IRB WhatsApp AI' }
-    : undefined,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export interface ToolCall {
@@ -40,13 +33,8 @@ export async function callClaude(params: {
     ...messages,
   ];
 
-  // Use Claude via OpenRouter by default, or GPT-4 if using OpenAI directly
-  const defaultModel = process.env.OPENROUTER_API_KEY 
-    ? 'anthropic/claude-sonnet-4' 
-    : 'gpt-4o';
-
   const response = await openai.chat.completions.create({
-    model: process.env.AI_MODEL || defaultModel,
+    model: process.env.AI_MODEL || 'gpt-4o',
     max_tokens: maxTokens,
     temperature,
     messages: allMessages,

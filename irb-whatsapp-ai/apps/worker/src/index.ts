@@ -10,6 +10,8 @@ import { processAnalytics } from './processors/analytics.js';
 import { processBookingCleanup } from './processors/booking-cleanup.js';
 import { processAppointmentReminder } from './processors/appointment-reminder.js';
 import { processKlingoSync } from './processors/klingo-sync.js';
+import { processAppointmentConfirmation } from './processors/appointment-confirmation.js';
+import { processNpsCollection } from './processors/nps-collection.js';
 
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -54,6 +56,14 @@ async function start() {
       connection: redisConnection,
       concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.KLINGO_SYNC],
     }),
+    new Worker(QUEUE_NAMES.APPOINTMENT_CONFIRMATION, processAppointmentConfirmation, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.APPOINTMENT_CONFIRMATION],
+    }),
+    new Worker(QUEUE_NAMES.NPS_COLLECTION, processNpsCollection, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.NPS_COLLECTION],
+    }),
   ];
 
   // Schedule repeatable booking cleanup job (every hour)
@@ -68,6 +78,14 @@ async function start() {
   const reminderQueue = new Queue(QUEUE_NAMES.APPOINTMENT_REMINDER, { connection: redisConnection });
   await reminderQueue.add('daily-reminder', {}, {
     repeat: { pattern: '0 21 * * *' }, // 21:00 UTC = 18:00 BRT
+    removeOnComplete: 10,
+    removeOnFail: 50,
+  });
+
+  // Schedule daily appointment confirmation (every day at 14:00 BRT / 17:00 UTC)
+  const confirmationQueue = new Queue(QUEUE_NAMES.APPOINTMENT_CONFIRMATION, { connection: redisConnection });
+  await confirmationQueue.add('daily-confirmation', {}, {
+    repeat: { pattern: '0 17 * * *' }, // 17:00 UTC = 14:00 BRT
     removeOnComplete: 10,
     removeOnFail: 50,
   });

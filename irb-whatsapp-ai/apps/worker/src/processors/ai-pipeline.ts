@@ -111,7 +111,56 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
       const specialty = toolInput.specialty as string;
       const doctors = await db.select().from(schema.doctors)
         .where(ilike(schema.doctors.specialty, `%${specialty}%`));
-      // Simplified - in production would check actual appointment slots
+
+      // Try External API for real slots
+      const KLINGO_APP_TOKEN = process.env.KLINGO_APP_TOKEN;
+      const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
+
+      if (KLINGO_APP_TOKEN) {
+        try {
+          const now = new Date();
+          const start = new Date(now);
+          start.setDate(start.getDate() + 1);
+          const end = new Date(now);
+          end.setDate(end.getDate() + 8);
+
+          const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/agenda/horarios?inicio=${start.toISOString().split('T')[0]}&fim=${end.toISOString().split('T')[0]}`, {
+            headers: {
+              'Accept': 'application/json',
+              'X-APP-TOKEN': KLINGO_APP_TOKEN,
+            },
+          });
+
+          if (res.ok) {
+            const data = await res.json() as { data?: Array<{ data: string; hora: string; nome_medico: string; especialidade: string }> };
+            const extSlots = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data as any[] : []);
+
+            // Filter by specialty if possible
+            const filtered = extSlots.filter((s: any) =>
+              !specialty || (s.especialidade && s.especialidade.toLowerCase().includes(specialty.toLowerCase()))
+            ).slice(0, 6);
+
+            if (filtered.length > 0) {
+              return JSON.stringify({
+                available: true,
+                source: 'klingo_external',
+                doctors: doctors.map(d => ({ name: d.name, crm: d.crm })),
+                nextSlots: filtered.map((s: any) => ({
+                  date: s.data,
+                  time: s.hora,
+                  doctor: s.nome_medico,
+                  specialty: s.especialidade,
+                })),
+                message: `Temos ${filtered.length} horário(s) disponível(is) em ${specialty}`,
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[ai-pipeline] External API check_availability error:', err);
+        }
+      }
+
+      // Fallback: generic availability info
       return JSON.stringify({
         available: true,
         doctors: doctors.map(d => ({ name: d.name, crm: d.crm })),
@@ -359,6 +408,123 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         token,
         expiresAt: expiresAt.toISOString(),
         message: `Link de agendamento criado: ${url}`,
+      });
+    }
+
+    case 'cancel_appointment': {
+      const KLINGO_APP_TOKEN = process.env.KLINGO_APP_TOKEN;
+      const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
+
+      if (!context?.patientPhone) {
+        return JSON.stringify({ success: false, message: 'Paciente não identificado' });
+      }
+
+      // Find patient's upcoming appointments
+      const [patient] = await db.select()
+        .from(schema.patients)
+        .where(eq(schema.patients.phone, context.patientPhone))
+        .limit(1);
+
+      if (!patient) {
+        return JSON.stringify({ success: false, message: 'Paciente não encontrado' });
+      }
+
+      const now = new Date();
+      const upcomingAppts = await db.select()
+        .from(schema.appointments)
+        .where(and(
+          eq(schema.appointments.patientId, patient.id),
+          gte(schema.appointments.scheduledAt, now),
+          ne(schema.appointments.status, 'cancelled'),
+        ));
+
+      if (upcomingAppts.length === 0) {
+        return JSON.stringify({ success: false, message: 'Nenhum agendamento futuro encontrado' });
+      }
+
+      // Cancel the nearest appointment
+      const nextAppt = upcomingAppts.sort((a, b) =>
+        new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+      )[0];
+
+      // Try to cancel via External API
+      if (KLINGO_APP_TOKEN && nextAppt.klingoVoucherId) {
+        try {
+          await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/voucher?id=${nextAppt.klingoVoucherId}`, {
+            method: 'DELETE',
+            headers: { 'X-APP-TOKEN': KLINGO_APP_TOKEN, 'Accept': 'application/json' },
+          });
+        } catch (err) {
+          console.error('[ai-pipeline] External API cancel error:', err);
+        }
+      }
+
+      // Update local status
+      await db.update(schema.appointments)
+        .set({ status: 'cancelled' })
+        .where(eq(schema.appointments.id, nextAppt.id));
+
+      const dateFormatted = new Date(nextAppt.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      const timeFormatted = new Date(nextAppt.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+      return JSON.stringify({
+        success: true,
+        message: `Consulta de ${dateFormatted} às ${timeFormatted} cancelada com sucesso`,
+      });
+    }
+
+    case 'get_patient_appointments': {
+      if (!context?.patientPhone) {
+        return JSON.stringify({ success: false, message: 'Paciente não identificado' });
+      }
+
+      const [patient] = await db.select()
+        .from(schema.patients)
+        .where(eq(schema.patients.phone, context.patientPhone))
+        .limit(1);
+
+      if (!patient) {
+        return JSON.stringify({ appointments: [], message: 'Nenhum agendamento encontrado' });
+      }
+
+      const now = new Date();
+      const appointments = await db.select({
+        id: schema.appointments.id,
+        scheduledAt: schema.appointments.scheduledAt,
+        status: schema.appointments.status,
+        doctorName: schema.doctors.name,
+        specialty: schema.doctors.specialty,
+      })
+        .from(schema.appointments)
+        .leftJoin(schema.doctors, eq(schema.appointments.doctorId, schema.doctors.id))
+        .where(and(
+          eq(schema.appointments.patientId, patient.id),
+          gte(schema.appointments.scheduledAt, now),
+          ne(schema.appointments.status, 'cancelled'),
+        ));
+
+      if (appointments.length === 0) {
+        return JSON.stringify({ appointments: [], message: 'Nenhum agendamento futuro encontrado' });
+      }
+
+      return JSON.stringify({
+        appointments: appointments.map(a => ({
+          date: new Date(a.scheduledAt).toLocaleDateString('pt-BR'),
+          time: new Date(a.scheduledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          doctor: a.doctorName,
+          specialty: a.specialty,
+          status: a.status,
+        })),
+        message: `Encontrei ${appointments.length} agendamento(s) futuro(s)`,
+      });
+    }
+
+    case 'check_exam_results': {
+      // This would need exam data from Klingo. For now, return a helpful response.
+      return JSON.stringify({
+        success: true,
+        results: [],
+        message: 'Para verificar resultados de exames, o paciente pode acessar o portal do paciente ou entrar em contato com a recepção.',
       });
     }
 

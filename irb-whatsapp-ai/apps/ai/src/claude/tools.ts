@@ -163,4 +163,42 @@ export const aiTools: OpenAI.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_appointment',
+      description: 'Cancela uma consulta do paciente. Use quando o paciente pedir pra cancelar. Não precisa mais escalar pra humano!',
+      parameters: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: 'Motivo do cancelamento informado pelo paciente' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_patient_appointments',
+      description: 'Lista os agendamentos futuros do paciente. Use quando o paciente perguntar sobre suas consultas marcadas.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_exam_results',
+      description: 'Verifica se o paciente tem resultados de exames disponíveis. Use quando o paciente perguntar sobre resultados.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ];

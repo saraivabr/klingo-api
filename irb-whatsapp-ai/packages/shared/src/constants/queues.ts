@@ -7,6 +7,8 @@ export const QUEUE_NAMES = {
   BOOKING_CLEANUP: 'booking-cleanup',
   APPOINTMENT_REMINDER: 'appointment-reminder',
   KLINGO_SYNC: 'klingo-sync',
+  APPOINTMENT_CONFIRMATION: 'appointment-confirmation',
+  NPS_COLLECTION: 'nps-collection',
 } as const;
 
 export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES];
@@ -20,4 +22,6 @@ export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
   'booking-cleanup': 1,
   'appointment-reminder': 2,
   'klingo-sync': 2,
+  'appointment-confirmation': 2,
+  'nps-collection': 2,
 };

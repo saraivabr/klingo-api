@@ -5,6 +5,31 @@ import { QUEUE_NAMES } from '@irb/shared/constants';
 import { eq } from 'drizzle-orm';
 import { transcribeAudio } from '@irb/ai';
 
+// === Klingo External API (patient identification by phone) ===
+const KLINGO_APP_TOKEN = process.env.KLINGO_APP_TOKEN;
+const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
+
+async function identifyKlingoPatient(phone: string): Promise<number | null> {
+  if (!KLINGO_APP_TOKEN) return null;
+  try {
+    const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/paciente/identificar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-APP-TOKEN': KLINGO_APP_TOKEN,
+      },
+      body: JSON.stringify({ telefone: phone, apenas_telefone: true }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { data?: { id_pessoa?: number }; id_pessoa?: number };
+    return data?.data?.id_pessoa ?? data?.id_pessoa ?? null;
+  } catch (err) {
+    console.warn(`[intake] Klingo external identify failed for ${phone}:`, (err as Error).message);
+    return null;
+  }
+}
+
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
@@ -135,6 +160,185 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
       return { status: 'calendar_ok_ack' };
     }
 
+    // 2.55. Handle appointment confirmation buttons (confirm_*, cancel_*, reschedule_*)
+    if (buttonResponse?.startsWith('confirm_') && KLINGO_APP_TOKEN) {
+      const aptId = parseInt(buttonResponse.replace('confirm_', ''));
+      if (!isNaN(aptId)) {
+        try {
+          const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/telefonia/confirmar`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-APP-TOKEN': KLINGO_APP_TOKEN,
+            },
+            body: JSON.stringify({ id: aptId, status: 'C' }),
+          });
+
+          const responseText = res.ok
+            ? 'Confirmado! ✅ Te esperamos amanhã na IRB Prime Care. Chegue 10 minutinhos antes, tá bom? 😊'
+            : 'Tivemos um probleminha pra confirmar no sistema, mas já anotamos aqui! Pode ficar tranquilo(a). 😊';
+
+          const existingConv = await ConversationModel.findOne({
+            patientPhone: normalizedPhone,
+            status: { $ne: 'closed' },
+          }).sort({ lastMessageAt: -1 });
+
+          if (existingConv) {
+            await messageSendQueue.add('send', {
+              conversationId: existingConv._id.toString(),
+              patientPhone: normalizedPhone,
+              text: responseText,
+              instanceName,
+            }, { removeOnComplete: 100, removeOnFail: 500 });
+          }
+        } catch (err) {
+          console.error(`[intake] Confirmation error for ${aptId}:`, (err as Error).message);
+        }
+        return { status: 'appointment_confirmed', appointmentId: aptId };
+      }
+    }
+
+    if (buttonResponse?.startsWith('cancel_') && KLINGO_APP_TOKEN) {
+      const aptId = parseInt(buttonResponse.replace('cancel_', ''));
+      if (!isNaN(aptId)) {
+        try {
+          // Use status 'R' (Reschedule/Cancel) — 'N' means No-show which corrupts attendance analytics
+          await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/telefonia/confirmar`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-APP-TOKEN': KLINGO_APP_TOKEN,
+            },
+            body: JSON.stringify({ id: aptId, status: 'R' }),
+          });
+
+          const existingConv = await ConversationModel.findOne({
+            patientPhone: normalizedPhone,
+            status: { $ne: 'closed' },
+          }).sort({ lastMessageAt: -1 });
+
+          if (existingConv) {
+            await messageSendQueue.add('send', {
+              conversationId: existingConv._id.toString(),
+              patientPhone: normalizedPhone,
+              text: 'Tudo bem, cancelamos sua consulta. 😊 Se quiser remarcar, é só me chamar aqui!',
+              instanceName,
+            }, { removeOnComplete: 100, removeOnFail: 500 });
+          }
+        } catch (err) {
+          console.error(`[intake] Cancellation error for ${aptId}:`, (err as Error).message);
+        }
+        return { status: 'appointment_cancelled', appointmentId: aptId };
+      }
+    }
+
+    if (buttonResponse?.startsWith('reschedule_')) {
+      const aptId = buttonResponse.replace('reschedule_', '');
+      // Override text so AI pipeline gets context about rescheduling
+      text = `Gostaria de remarcar minha consulta (referência: ${aptId})`;
+      // Fall through to normal AI pipeline processing
+    }
+
+    // 2.56. Handle NPS responses (nps_*)
+    if (buttonResponse?.startsWith('nps_') && KLINGO_APP_TOKEN) {
+      const scoreStr = buttonResponse.replace('nps_', '');
+      const score = parseInt(scoreStr);
+      if (!isNaN(score)) {
+        const marcacaoId = await redis.get(`nps_pending:${normalizePhone(phone)}`);
+        if (marcacaoId) {
+          try {
+            await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/telefonia/nps`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-APP-TOKEN': KLINGO_APP_TOKEN,
+              },
+              body: JSON.stringify({ id: parseInt(marcacaoId), nota: score }),
+            });
+          } catch (err) {
+            console.error(`[intake] NPS registration error:`, (err as Error).message);
+          }
+
+          await redis.del(`nps_pending:${normalizePhone(phone)}`);
+
+          let responseText: string;
+          if (score >= 9) {
+            responseText = 'Que bom que gostou! 😊💛 Sua avaliação é muito importante pra gente. Obrigada!';
+          } else if (score >= 7) {
+            responseText = 'Obrigada pela avaliação! 😊 Vamos continuar trabalhando pra melhorar sempre.';
+          } else {
+            responseText = 'Obrigada pelo feedback! 🙏 Vou encaminhar pro nosso time pra que possamos melhorar. Se quiser, pode me contar mais sobre o que aconteceu.';
+          }
+
+          const existingConv = await ConversationModel.findOne({
+            patientPhone: normalizePhone(phone),
+            status: { $ne: 'closed' },
+          }).sort({ lastMessageAt: -1 });
+
+          if (existingConv) {
+            await messageSendQueue.add('send', {
+              conversationId: existingConv._id.toString(),
+              patientPhone: normalizePhone(phone),
+              text: responseText,
+              instanceName,
+            }, { removeOnComplete: 100, removeOnFail: 500 });
+          }
+
+          return { status: 'nps_recorded', score };
+        }
+      }
+    }
+
+    // 2.57. Handle check-in button (checkin_*)
+    if (buttonResponse?.startsWith('checkin_') && KLINGO_APP_TOKEN) {
+      const marcacaoId = parseInt(buttonResponse.replace('checkin_', ''));
+      if (!isNaN(marcacaoId)) {
+        try {
+          // Find patient's klingo ID
+          const [pat] = await db.select({ klingoPatientId: schema.patients.klingoPatientId })
+            .from(schema.patients)
+            .where(eq(schema.patients.phone, normalizePhone(phone)))
+            .limit(1);
+
+          if (pat?.klingoPatientId) {
+            const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/checkin`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-APP-TOKEN': KLINGO_APP_TOKEN,
+              },
+              body: JSON.stringify({ id_marcacao: marcacaoId, id_paciente: pat.klingoPatientId }),
+            });
+
+            const responseText = res.ok
+              ? 'Check-in feito com sucesso! ✅ Agora é só aguardar ser chamado(a). 😊'
+              : 'Não consegui fazer o check-in pelo sistema, mas pode se apresentar na recepção normalmente! 😊';
+
+            const existingConv = await ConversationModel.findOne({
+              patientPhone: normalizePhone(phone),
+              status: { $ne: 'closed' },
+            }).sort({ lastMessageAt: -1 });
+
+            if (existingConv) {
+              await messageSendQueue.add('send', {
+                conversationId: existingConv._id.toString(),
+                patientPhone: normalizePhone(phone),
+                text: responseText,
+                instanceName,
+              }, { removeOnComplete: 100, removeOnFail: 500 });
+            }
+          }
+        } catch (err) {
+          console.error(`[intake] Check-in error:`, (err as Error).message);
+        }
+        return { status: 'checkin_processed', marcacaoId };
+      }
+    }
+
      // 2.6. Transcribe audio if it's an audio message
      const isAudio = (messageType === 'audioMessage' || messageType === 'audio') || !!audioUrl || !!audioMessageKey;
     if (isAudio && !text) {
@@ -169,6 +373,18 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
         .set({ name: pushName, updatedAt: new Date() })
         .where(eq(schema.patients.id, patient.id));
       patient.name = pushName;
+    }
+
+    // 3.5. Try to identify patient in Klingo by phone (non-blocking)
+    if (!patient.klingoPatientId && KLINGO_APP_TOKEN) {
+      const klingoId = await identifyKlingoPatient(normalizedPhone);
+      if (klingoId) {
+        await db.update(schema.patients)
+          .set({ klingoPatientId: klingoId, updatedAt: new Date() })
+          .where(eq(schema.patients.id, patient.id));
+        patient.klingoPatientId = klingoId;
+        console.log(`[intake] Klingo patient identified: ${normalizedPhone} → ${klingoId}`);
+      }
     }
 
     // 4. Find or create conversation in MongoDB

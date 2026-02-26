@@ -2,6 +2,15 @@ import { Job } from 'bullmq';
 import { db, schema } from '@irb/database';
 import { eq } from 'drizzle-orm';
 
+// === Klingo External API (non-blocking sync) ===
+const KLINGO_APP_TOKEN = process.env.KLINGO_APP_TOKEN;
+const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
+
+// NOTE: External API sync for booking creation requires `id_horario` from slot responses.
+// Until Klingo provides slot IDs in /api/agenda/horarios, we use AQL for booking creation.
+// The External API is used for: patient identification, slot listing, confirmation, NPS, check-in.
+// TODO: Enable when Klingo adds id_horario → reserveSlot → confirmBooking flow.
+
 interface KlingoSyncJobData {
   appointmentId: string;
   patientName: string;
@@ -126,6 +135,8 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
   const { appointmentId, patientName, cpf, birthDate, patientPhone, doctorId, slotDate } = job.data;
 
   console.log(`[klingo-sync] Processing appointment ${appointmentId} (attempt ${job.attemptsMade + 1})`);
+
+  // TODO: When External API supports booking via id_horario, try it first here.
 
   try {
     const klingo = getClient();

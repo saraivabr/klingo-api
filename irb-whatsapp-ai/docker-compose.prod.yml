@@ -63,6 +63,8 @@ services:
       - KLINGO_LOGIN=${KLINGO_LOGIN}
       - KLINGO_SENHA=${KLINGO_SENHA}
       - KLINGO_DOMAIN=${KLINGO_DOMAIN:-irb}
+      - KLINGO_APP_TOKEN=${KLINGO_APP_TOKEN}
+      - KLINGO_EXTERNAL_BASE_URL=${KLINGO_EXTERNAL_BASE_URL:-https://api-externa.klingo.app}
       - IGS_BASE_URL=${IGS_BASE_URL:-https://prdapolobr.igs.teknosgroup.com/api-apolo/v1}
       - IGS_SERVICE=${IGS_SERVICE}
       - IGS_AUTH_KEY=${IGS_AUTH_KEY}
@@ -95,6 +97,8 @@ services:
       - KLINGO_LOGIN=${KLINGO_LOGIN}
       - KLINGO_SENHA=${KLINGO_SENHA}
       - KLINGO_DOMAIN=${KLINGO_DOMAIN:-irb}
+      - KLINGO_APP_TOKEN=${KLINGO_APP_TOKEN}
+      - KLINGO_EXTERNAL_BASE_URL=${KLINGO_EXTERNAL_BASE_URL:-https://api-externa.klingo.app}
     depends_on:
       postgres:
         condition: service_healthy
