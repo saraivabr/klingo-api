@@ -78,7 +78,7 @@ class KlingoSyncClient {
 
     if (!res.ok) throw new Error(`Klingo AQL error (${name}): ${res.status}`);
 
-    const data = await res.json();
+    const data = await res.json() as any;
     if (data.lista?.status && Number(data.lista.status) >= 400) {
       throw new Error(`Klingo AQL error-in-200 (${name}): status=${data.lista.status}`);
     }
