@@ -2,14 +2,8 @@ import { Job } from 'bullmq';
 import { db, schema } from '@irb/database';
 import { eq } from 'drizzle-orm';
 
-// === Klingo External API (non-blocking sync) ===
 const KLINGO_APP_TOKEN = process.env.KLINGO_APP_TOKEN;
 const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
-
-// NOTE: External API sync for booking creation requires `id_horario` from slot responses.
-// Until Klingo provides slot IDs in /api/agenda/horarios, we use AQL for booking creation.
-// The External API is used for: patient identification, slot listing, confirmation, NPS, check-in.
-// TODO: Enable when Klingo adds id_horario → reserveSlot → confirmBooking flow.
 
 interface KlingoSyncJobData {
   appointmentId: string;
@@ -19,124 +13,89 @@ interface KlingoSyncJobData {
   patientPhone?: string;
   doctorId?: string;
   slotDate: string;
+  klingoSlotId?: number;
 }
 
-/** Minimal Klingo API client for the worker (avoids cross-app imports) */
-class KlingoSyncClient {
-  private baseUrl = 'https://api.klingo.app/api';
-  private token: string | null = null;
-  private tokenExpiresAt = 0;
-  private domain: string;
-  private login: string;
-  private senha: string;
+/** Minimal Klingo External API client for the worker (avoids cross-app imports) */
+class KlingoExternalWorkerClient {
+  private baseUrl: string;
+  private appToken: string;
 
   constructor() {
-    this.login = process.env.KLINGO_LOGIN || '';
-    this.senha = process.env.KLINGO_SENHA || '';
-    this.domain = process.env.KLINGO_DOMAIN || 'irb';
+    this.appToken = KLINGO_APP_TOKEN || '';
+    this.baseUrl = KLINGO_EXTERNAL_BASE_URL.replace(/\/$/, '');
   }
 
-  private async ensureAuth(): Promise<void> {
-    if (this.token && Date.now() < this.tokenExpiresAt) return;
+  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+      'X-APP-TOKEN': this.appToken,
+      'Accept': 'application/json',
+    };
+    if (body) headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(`${this.baseUrl}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-DOMAIN': this.domain,
-        'X-PORTAL': '0',
-        'X-UNIDADE': '1',
-      },
-      body: JSON.stringify({ login: this.login, senha: this.senha }),
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!res.ok) throw new Error(`Klingo login failed: ${res.status}`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Klingo External API error: ${method} ${path} → ${res.status}: ${text}`);
+    }
 
-    const data = await res.json() as { access_token?: string; token?: string };
-    this.token = data.access_token || data.token || null;
-    if (!this.token) throw new Error('Klingo login: no token returned');
-    this.tokenExpiresAt = Date.now() + 50 * 60 * 1000;
-    console.log('[klingo-sync] Auth token refreshed');
+    return await res.json() as T;
   }
 
-  private async aql(name: string, parms: Record<string, unknown>, action: string): Promise<any> {
-    await this.ensureAuth();
-
-    const res = await fetch(`${this.baseUrl}/aql?a=${action}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${this.token}`,
-        'X-DOMAIN': this.domain,
-        'X-PORTAL': '0',
-        'X-UNIDADE': '1',
-      },
-      body: JSON.stringify({ q: [{ name, id: 'lista', parms }] }),
+  async identifyPatientByPhone(phone: string): Promise<{ data?: { id_pessoa: number } }> {
+    return this.request('POST', '/api/paciente/identificar', {
+      telefone: phone,
+      apenas_telefone: true,
     });
-
-    if (!res.ok) throw new Error(`Klingo AQL error (${name}): ${res.status}`);
-
-    const data = await res.json() as any;
-    if (data.lista?.status && Number(data.lista.status) >= 400) {
-      throw new Error(`Klingo AQL error-in-200 (${name}): status=${data.lista.status}`);
-    }
-    return data;
   }
 
-  async searchPatientByCpf(cpf: string): Promise<{ id_pessoa: number } | null> {
-    const result = await this.aql('pacientes.index', { search: cpf }, 'pacientes.index');
-    const data = result.lista?.data;
-    const patients = data?.data || data?.pacientes || [];
-    if (Array.isArray(patients) && patients.length > 0) {
-      return { id_pessoa: patients[0].id_pessoa || patients[0].id };
-    }
-    return null;
+  async identifyPatientByCpf(cpf: string): Promise<{ data?: { id_pessoa: number } }> {
+    return this.request('GET', `/api/paciente/cpf?cpf=${encodeURIComponent(cpf)}`);
   }
 
-  async createPatient(data: { nome: string; cpf?: string; nascimento?: string; telefone?: string }): Promise<{ id_pessoa: number }> {
-    const parms: Record<string, unknown> = { st_nome: data.nome };
-    if (data.cpf) parms.st_cpf = data.cpf;
-    if (data.nascimento) parms.dt_nascimento = data.nascimento;
-    if (data.telefone) parms.st_telefone = data.telefone;
-
-    const result = await this.aql('pacientes.store', parms, 'pacientes.store');
-    const resData = result.lista?.data;
-    const idPessoa = resData?.id_pessoa || resData?.id;
-    if (!idPessoa) throw new Error('Klingo createPatient: no id_pessoa returned');
-    return { id_pessoa: idPessoa };
+  async reserveSlot(data: { id_horario: number; id_paciente: number }): Promise<{ data?: { id: string } }> {
+    return this.request('POST', '/api/agenda/reservar', data);
   }
 
-  async createBooking(data: { id_paciente: number; id_medico: number; data: string; hora: string }): Promise<any> {
-    const result = await this.aql('agendas.store', {
-      id_pessoa: data.id_paciente,
-      medico: data.id_medico,
-      data: data.data,
-      hora: data.hora,
-      unidade_operacao: 1,
-    }, 'agendas.store');
-
-    const bookingData = result.lista?.data;
-    if (!bookingData) {
-      throw new Error(`Klingo createBooking: empty response (patient=${data.id_paciente}, doctor=${data.id_medico})`);
-    }
-    return bookingData;
+  async confirmBooking(data: { id_reserva: string; id_paciente: number }): Promise<{ data?: { voucher_id: number } }> {
+    return this.request('POST', '/api/agenda/horario', data);
   }
 }
 
-let _client: KlingoSyncClient | null = null;
-function getClient(): KlingoSyncClient {
-  if (!_client) _client = new KlingoSyncClient();
+let _client: KlingoExternalWorkerClient | null = null;
+function getClient(): KlingoExternalWorkerClient {
+  if (!_client) _client = new KlingoExternalWorkerClient();
   return _client;
 }
 
 export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<void> {
-  const { appointmentId, patientName, cpf, birthDate, patientPhone, doctorId, slotDate } = job.data;
+  const { appointmentId, patientName, cpf, patientPhone, klingoSlotId } = job.data;
 
   console.log(`[klingo-sync] Processing appointment ${appointmentId} (attempt ${job.attemptsMade + 1})`);
 
-  // TODO: When External API supports booking via id_horario, try it first here.
+  if (!KLINGO_APP_TOKEN) {
+    console.warn('[klingo-sync] KLINGO_APP_TOKEN not set, skipping');
+    await db.update(schema.appointments)
+      .set({ klingoSyncStatus: 'skipped' })
+      .where(eq(schema.appointments.id, appointmentId));
+    return;
+  }
+
+  if (!klingoSlotId) {
+    console.warn(`[klingo-sync] No klingoSlotId for appointment ${appointmentId}, cannot reserve`);
+    await db.update(schema.appointments)
+      .set({
+        klingoSyncStatus: 'failed',
+        klingoSyncError: 'No klingoSlotId provided — slot came from fallback or missing ID',
+      })
+      .where(eq(schema.appointments.id, appointmentId));
+    return;
+  }
 
   try {
     const klingo = getClient();
@@ -146,65 +105,48 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
       .set({ klingoSyncAttempts: job.attemptsMade + 1 })
       .where(eq(schema.appointments.id, appointmentId));
 
-    // Find doctor's klingoId
-    let klingoMedicoId: number | null = null;
-    if (doctorId) {
-      const [doc] = await db.select({ klingoId: schema.doctors.klingoId })
-        .from(schema.doctors)
-        .where(eq(schema.doctors.id, doctorId))
-        .limit(1);
-      klingoMedicoId = doc?.klingoId ?? null;
+    // Identify patient in Klingo
+    let klingoPatientId: number | null = null;
+
+    if (cpf) {
+      const result = await klingo.identifyPatientByCpf(cpf);
+      if (result.data?.id_pessoa) {
+        klingoPatientId = result.data.id_pessoa;
+      }
     }
 
-    if (!klingoMedicoId) {
-      console.warn(`[klingo-sync] No klingoId for doctor ${doctorId}, marking as failed`);
+    if (!klingoPatientId && patientPhone) {
+      const result = await klingo.identifyPatientByPhone(patientPhone);
+      if (result.data?.id_pessoa) {
+        klingoPatientId = result.data.id_pessoa;
+      }
+    }
+
+    if (!klingoPatientId) {
+      console.warn(`[klingo-sync] Patient not found in Klingo for appointment ${appointmentId}`);
       await db.update(schema.appointments)
         .set({
           klingoSyncStatus: 'failed',
-          klingoSyncError: `No klingoId for doctor ${doctorId}`,
+          klingoSyncError: `Patient not found in Klingo (name=${patientName}, cpf=${cpf ? 'yes' : 'no'}, phone=${patientPhone || 'none'})`,
         })
         .where(eq(schema.appointments.id, appointmentId));
       return;
     }
 
-    // Find or create patient in Klingo
-    let klingoPatientId: number | null = null;
-    if (cpf) {
-      const existing = await klingo.searchPatientByCpf(cpf);
-      if (existing) {
-        klingoPatientId = existing.id_pessoa;
-      }
-    }
-
-    if (!klingoPatientId) {
-      let nascimento: string | undefined;
-      if (birthDate) {
-        const digits = birthDate.replace(/\D/g, '');
-        if (digits.length === 8) {
-          nascimento = `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-        }
-      }
-      const created = await klingo.createPatient({
-        nome: patientName,
-        cpf: cpf || undefined,
-        nascimento,
-        telefone: patientPhone || undefined,
-      });
-      klingoPatientId = created.id_pessoa;
-    }
-
-    // Create booking in Klingo
-    const slot = new Date(slotDate);
-    const slotDateStr = slot.toISOString().split('T')[0];
-    const slotTimeStr = slot.toLocaleTimeString('pt-BR', {
-      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Sao_Paulo',
+    // Reserve the slot
+    const reservation = await klingo.reserveSlot({
+      id_horario: klingoSlotId,
+      id_paciente: klingoPatientId,
     });
 
-    await klingo.createBooking({
+    if (!reservation.data?.id) {
+      throw new Error('reserveSlot returned no reservation ID');
+    }
+
+    // Confirm the booking
+    const confirmation = await klingo.confirmBooking({
+      id_reserva: reservation.data.id,
       id_paciente: klingoPatientId,
-      id_medico: klingoMedicoId,
-      data: slotDateStr,
-      hora: slotTimeStr,
     });
 
     // Mark as synced
@@ -212,15 +154,16 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
       .set({
         klingoSyncStatus: 'synced',
         klingoSyncError: null,
+        klingoVoucherId: confirmation.data?.voucher_id ?? null,
+        klingoReservationId: reservation.data.id,
       })
       .where(eq(schema.appointments.id, appointmentId));
 
-    console.log(`[klingo-sync] Appointment ${appointmentId} synced successfully`);
+    console.log(`[klingo-sync] Appointment ${appointmentId} synced: voucher=${confirmation.data?.voucher_id}, reservation=${reservation.data.id}`);
 
   } catch (err: any) {
     console.error(`[klingo-sync] Error syncing appointment ${appointmentId}:`, err.message);
 
-    // If this is the last attempt, mark as failed
     const maxAttempts = job.opts?.attempts || 3;
     if (job.attemptsMade + 1 >= maxAttempts) {
       await db.update(schema.appointments)

@@ -3,7 +3,6 @@ import { db, schema, redis } from '@irb/database';
 import { eq, and, ilike, gte, lt, ne } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { QUEUE_NAMES } from '@irb/shared/constants';
-import { getKlingoClient } from '../services/klingo-client.js';
 import { getKlingoExternalClient } from '../services/klingo-external-client.js';
 import { createHash } from 'crypto';
 
@@ -36,13 +35,13 @@ const redisConnection = {
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
-const klingoSyncQueue = new Queue(QUEUE_NAMES.KLINGO_SYNC, { connection: redisConnection });
 
 interface SlotWithSource {
   date: string;
   time: string;
   dateTime: string;
   source: 'klingo' | 'fallback';
+  klingoSlotId?: number;
 }
 
 function generateFallbackSlots(durationMinutes: number = 30): SlotWithSource[] {
@@ -142,6 +141,7 @@ export async function bookingRoutes(app: FastifyInstance) {
             time: s.hora,
             dateTime: slotDate.toISOString(),
             source: 'klingo',
+            klingoSlotId: s.id,
           });
         }
 
@@ -157,59 +157,11 @@ export async function bookingRoutes(app: FastifyInstance) {
           console.log(`[booking] Got ${slots.length} slots from External API`);
         }
       } catch (err) {
-        console.error('[booking] External API slots error, trying AQL fallback:', err);
+        console.error('[booking] External API slots error:', err);
       }
     }
 
-    // Priority 2: AQL (legacy) fallback
-    if (slots.length === 0 && process.env.KLINGO_LOGIN) {
-      try {
-        const klingo = getKlingoClient();
-
-        const klingoIds: number[] = [];
-        if (link.doctorId) {
-          const [doc] = await db.select({ klingoId: schema.doctors.klingoId })
-            .from(schema.doctors)
-            .where(eq(schema.doctors.id, link.doctorId))
-            .limit(1);
-          if (doc?.klingoId) klingoIds.push(doc.klingoId);
-        }
-
-        if (klingoIds.length === 0 && doctorsList.length > 0) {
-          for (const doc of doctorsList) {
-            if (doc.klingoId) {
-              klingoIds.push(doc.klingoId);
-              if (klingoIds.length >= 5) break;
-            }
-          }
-        }
-
-        for (const klingoId of klingoIds) {
-          try {
-            const doctorSlots = await klingo.getSmartSlots(klingoId, {
-              daysAhead: 7,
-              maxSlots: 9,
-              period: 'any',
-            });
-            slots.push(...doctorSlots.map(s => ({ ...s, source: 'klingo' as const })));
-          } catch (err) {
-            console.error(`Klingo AQL slots error for doctor ${klingoId}:`, err);
-          }
-          if (slots.length >= 9) break;
-        }
-
-        const seen = new Set<string>();
-        slots = slots.filter(s => {
-          if (seen.has(s.dateTime)) return false;
-          seen.add(s.dateTime);
-          return true;
-        }).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()).slice(0, 9);
-      } catch (err) {
-        console.error('Klingo AQL error, using fallback slots:', err);
-      }
-    }
-
-    // Priority 3: Hardcoded fallback
+    // Priority 2: Hardcoded fallback
     if (slots.length === 0) {
       slots = generateFallbackSlots(service?.durationMinutes || 30);
     }
@@ -233,10 +185,10 @@ export async function bookingRoutes(app: FastifyInstance) {
   // POST /api/booking/:token/confirm - Confirm booking
   app.post<{
     Params: { token: string };
-    Body: { patientName: string; cpf?: string; birthDate?: string; email?: string; doctorId: string; slotDateTime: string; slotSource?: 'klingo' | 'fallback' };
+    Body: { patientName: string; cpf?: string; birthDate?: string; email?: string; doctorId: string; slotDateTime: string; slotSource?: 'klingo' | 'fallback'; klingoSlotId?: number };
   }>('/:token/confirm', async (request, reply) => {
     const { token } = request.params;
-    const { patientName, cpf, birthDate, doctorId, slotDateTime, slotSource } = request.body;
+    const { patientName, cpf, birthDate, doctorId, slotDateTime, slotSource, klingoSlotId } = request.body;
 
     if (!patientName || !slotDateTime) {
       return reply.status(400).send({ error: 'Nome e horário são obrigatórios' });
@@ -343,7 +295,7 @@ export async function bookingRoutes(app: FastifyInstance) {
         status: isFallback ? 'pending_confirmation' : 'scheduled',
         createdBy: 'booking_link',
         conversationMongoId: link.conversationMongoId || undefined,
-        klingoSyncStatus: process.env.KLINGO_LOGIN || process.env.KLINGO_APP_TOKEN ? 'pending' : 'skipped',
+        klingoSyncStatus: process.env.KLINGO_APP_TOKEN ? 'pending' : 'skipped',
       }).returning({ id: schema.appointments.id });
 
       // Update booking link
@@ -367,29 +319,64 @@ export async function bookingRoutes(app: FastifyInstance) {
       return reply.status(result.status as number).send({ error: result.error });
     }
 
-    // NOTE: External API reservation+confirmation flow requires `id_horario` from the slots response.
-    // Until the External API slot response includes slot IDs, we rely on AQL sync for booking creation.
-    // The External API is already used for: slot listing (GET), patient identification, and confirmation/NPS.
-    // TODO: When Klingo adds `id_horario` to /api/agenda/horarios response, enable:
-    //   1. klingoExt.reserveSlot({ id_horario, id_paciente }) → get id_reserva
-    //   2. klingoExt.confirmBooking({ id_reserva, id_paciente }) → get voucher_id
+    // Reserve + confirm slot in Klingo via External API
+    const klingoExt = getKlingoExternalClient();
+    if (klingoExt && klingoSlotId && slotSource === 'klingo') {
+      try {
+        // Identify patient in Klingo
+        let klingoPatientId: number | undefined;
 
-    // Enqueue Klingo sync via worker (retries automatically on failure)
-    if (process.env.KLINGO_LOGIN) {
-      await klingoSyncQueue.add('sync-booking', {
-        appointmentId: result.appointmentId,
-        patientName,
-        cpf,
-        birthDate,
-        patientPhone: result.link.patientPhone,
-        doctorId,
-        slotDate: slotDate.toISOString(),
-      }, {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: 100,
-        removeOnFail: 500,
-      });
+        if (cpf) {
+          const cpfResult = await klingoExt.identifyPatientByCpf(cpf);
+          if (cpfResult.data?.id_pessoa) {
+            klingoPatientId = cpfResult.data.id_pessoa;
+          }
+        }
+
+        if (!klingoPatientId && result.link.patientPhone) {
+          const phoneResult = await klingoExt.identifyPatientByPhone(result.link.patientPhone);
+          if (phoneResult.data?.id_pessoa) {
+            klingoPatientId = phoneResult.data.id_pessoa;
+          }
+        }
+
+        if (klingoPatientId) {
+          // Reserve the slot
+          const reservation = await klingoExt.reserveSlot({
+            id_horario: klingoSlotId,
+            id_paciente: klingoPatientId,
+          });
+
+          if (reservation.data?.id) {
+            // Confirm the booking
+            const confirmation = await klingoExt.confirmBooking({
+              id_reserva: reservation.data.id,
+              id_paciente: klingoPatientId,
+            });
+
+            // Save Klingo IDs in appointment
+            await db.update(schema.appointments).set({
+              klingoSyncStatus: 'synced',
+              klingoVoucherId: confirmation.data?.voucher_id ?? null,
+              klingoReservationId: reservation.data.id,
+            }).where(eq(schema.appointments.id, result.appointmentId));
+
+            console.log(`[booking] Klingo reservation confirmed: voucher=${confirmation.data?.voucher_id}, reservation=${reservation.data.id}`);
+          }
+        } else {
+          console.warn(`[booking] Patient not found in Klingo (cpf=${cpf ? 'yes' : 'no'}, phone=${result.link.patientPhone}), sync skipped`);
+          await db.update(schema.appointments).set({
+            klingoSyncStatus: 'failed',
+            klingoSyncError: 'Patient not found in Klingo (no CPF/phone match)',
+          }).where(eq(schema.appointments.id, result.appointmentId));
+        }
+      } catch (err: any) {
+        console.error(`[booking] Klingo reservation error:`, err.message);
+        await db.update(schema.appointments).set({
+          klingoSyncStatus: 'failed',
+          klingoSyncError: err.message,
+        }).where(eq(schema.appointments.id, result.appointmentId));
+      }
     }
 
     // Notify team if slot came from fallback (needs manual confirmation in Klingo)
