@@ -41,15 +41,17 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.api
-    container_name: irb-api
-    restart: always
-    ports:
-      - '127.0.0.1:3001:3001'
-    environment:
+   api:
+     build:
+       context: .
+       dockerfile: infra/docker/Dockerfile.api
+     container_name: irb-api
+     restart: always
+     ports:
+       - '127.0.0.1:3001:3001'
+     volumes:
+       - prescription_data:/data/prescriptions
+     environment:
       - NODE_ENV=production
       - API_PORT=3001
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -67,6 +69,7 @@ services:
       - IGS_AUTH_KEY=${IGS_AUTH_KEY}
       - IGS_USERNAME=${IGS_USERNAME}
       - IGS_PASSWORD=${IGS_PASSWORD}
+      - TELECONSULTA_BASE_URL=https://irb.saraiva.ai/consulta
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,6 +96,7 @@ services:
       - BOOKING_BASE_URL=https://irb.saraiva.ai/agendar
       - KLINGO_APP_TOKEN=${KLINGO_APP_TOKEN}
       - KLINGO_EXTERNAL_BASE_URL=${KLINGO_EXTERNAL_BASE_URL:-https://api-externa.klingo.app}
+      - TELECONSULTA_BASE_URL=https://irb.saraiva.ai/consulta
     depends_on:
       postgres:
         condition: service_healthy
@@ -129,3 +133,4 @@ volumes:
   postgres_data:
   mongo_data:
   redis_data:
+  prescription_data:

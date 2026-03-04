@@ -1,0 +1,31 @@
+FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@9 --activate
+WORKDIR /app
+
+# Copy all package.jsons for workspace resolution
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/database/package.json packages/database/
+COPY apps/api/package.json apps/api/
+COPY apps/ai/package.json apps/ai/
+# Stub remaining workspace packages so pnpm can resolve the full lockfile
+COPY apps/worker/package.json apps/worker/
+COPY apps/booking/package.json apps/booking/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/sync-klingo/package.json apps/sync-klingo/
+COPY apps/teleconsulta/package.json apps/teleconsulta/
+RUN pnpm install --frozen-lockfile
+
+# Build
+COPY tsconfig.base.json ./
+COPY packages/ packages/
+COPY apps/api/ apps/api/
+COPY apps/ai/ apps/ai/
+RUN pnpm --filter @irb/shared build && \
+    pnpm --filter @irb/database build && \
+    pnpm --filter @irb/ai build && \
+    pnpm --filter @irb/api build
+
+EXPOSE 3001
+RUN mkdir -p /data/prescriptions
+CMD ["node", "apps/api/dist/server.js"]
