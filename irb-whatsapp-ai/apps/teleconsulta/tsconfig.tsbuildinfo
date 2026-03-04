@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/devicecheck.tsx","./src/components/errorscreen.tsx","./src/components/incall.tsx","./src/components/loading.tsx","./src/components/postcall.tsx","./src/components/waitingroom.tsx"],"version":"5.9.3"}

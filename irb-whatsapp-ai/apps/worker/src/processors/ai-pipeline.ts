@@ -13,6 +13,7 @@ const redisConnection = {
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
 const followUpQueue = new Queue(QUEUE_NAMES.FOLLOW_UP, { connection: redisConnection });
 const analyticsQueue = new Queue(QUEUE_NAMES.ANALYTICS, { connection: redisConnection });
+const teleconsultationReminderQueue = new Queue(QUEUE_NAMES.TELECONSULTATION_REMINDER, { connection: redisConnection });
 
 interface AiPipelineJobData {
   conversationId: string;
@@ -29,9 +30,21 @@ const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || '';
 
 function pickReactionEmoji(text: string): string | null {
   const lower = text.toLowerCase().trim();
+  // Saudações
   if (/^(oi|olá|ola|bom dia|boa tarde|boa noite|hey|hello|e aí|eai)/.test(lower)) return '👋';
+  // Gratidão
   if (/(obrigad[oa]|valeu|agradeço|agradeco|brigad[oa])/.test(lower)) return '💛';
-  return null; // No reaction for most messages
+  // Confirmação de agendamento / decisão positiva
+  if (/\b(quero agendar|vamos l[aá]|bora|vou agendar|pode marcar|marca pra mim)\b/.test(lower)) return '🔥';
+  // Dor / sintoma — empatia
+  if (/\b(dor|doendo|doer|incomodo|incômodo|sofrendo|mal|passando mal)\b/.test(lower)) return '🫂';
+  // Família / filhos — amor
+  if (/\b(filh[oa]|beb[eê]|mam[ãa]e|pap[aã]i|gestante|gr[aá]vida|crian[cç]a)\b/.test(lower)) return '❤️';
+  // Comemoração / felicidade
+  if (/\b(consegui|deu certo|amei|adorei|maravilh|perfeito|otimo|ótimo)\b/.test(lower)) return '🎉';
+  // Risada / humor
+  if (/\b(kkk|haha|rsrs|😂|🤣)\b/.test(lower)) return '😂';
+  return null;
 }
 
 async function sendReactionToPatient(
@@ -528,6 +541,123 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
       });
     }
 
+    case 'send_location': {
+      // Location will be sent by message-send processor
+      return JSON.stringify({
+        success: true,
+        message: 'Localização da IRB Prime Care enviada no mapa! O paciente pode abrir no Waze ou Google Maps.',
+        address: 'Rua Boa Vista, 99 - 6º Andar, Centro, São Paulo - SP',
+        reference: 'Próximo ao Metrô São Bento, acima da Rua 25 de Março',
+      });
+    }
+
+    case 'generate_teleconsultation_link': {
+      const specialty = toolInput.specialty as string;
+      const doctorName = toolInput.doctor_name as string | undefined;
+      const scheduledAtStr = toolInput.scheduled_at as string;
+
+      // Parse date
+      const scheduledAt = new Date(scheduledAtStr.replace(' ', 'T') + ':00');
+      if (isNaN(scheduledAt.getTime())) {
+        return JSON.stringify({ success: false, message: 'Data/hora inválida. Use o formato YYYY-MM-DD HH:mm' });
+      }
+
+      // Find doctor by name or specialty
+      let doctor: { id: string; name: string; specialty: string | null } | undefined;
+      if (doctorName) {
+        const [found] = await db.select({ id: schema.doctors.id, name: schema.doctors.name, specialty: schema.doctors.specialty })
+          .from(schema.doctors)
+          .where(ilike(schema.doctors.name, `%${doctorName}%`))
+          .limit(1);
+        doctor = found;
+      }
+      if (!doctor) {
+        const [found] = await db.select({ id: schema.doctors.id, name: schema.doctors.name, specialty: schema.doctors.specialty })
+          .from(schema.doctors)
+          .where(ilike(schema.doctors.specialty, `%${specialty}%`))
+          .limit(1);
+        doctor = found;
+      }
+      if (!doctor) {
+        return JSON.stringify({ success: false, message: `Nenhum médico encontrado para ${specialty}. Verifique a especialidade.` });
+      }
+
+      // Find or create patient
+      let patientId: string | undefined;
+      if (context?.patientPhone) {
+        const [patient] = await db.select().from(schema.patients)
+          .where(eq(schema.patients.phone, context.patientPhone))
+          .limit(1);
+        if (patient) {
+          patientId = patient.id;
+        } else {
+          const [newPatient] = await db.insert(schema.patients)
+            .values({ phone: context.patientPhone, name: context.patientName, source: 'ai_teleconsulta' })
+            .returning({ id: schema.patients.id });
+          patientId = newPatient.id;
+        }
+      }
+
+      if (!patientId) {
+        return JSON.stringify({ success: false, message: 'Paciente não identificado' });
+      }
+
+      // Generate room code and token
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const part = () => Array.from(crypto.getRandomValues(new Uint8Array(4)))
+        .map(b => chars[b % chars.length]).join('');
+      const roomCode = `${part()}-${part()}`;
+
+      const tokenChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const patientToken = Array.from(crypto.getRandomValues(new Uint8Array(20)))
+        .map(b => tokenChars[b % tokenChars.length]).join('');
+
+      // Create teleconsultation room
+      const [room] = await db.insert(schema.teleconsultationRooms).values({
+        patientId,
+        doctorId: doctor.id,
+        roomCode,
+        patientToken,
+        status: 'waiting',
+        scheduledAt,
+      }).returning({ id: schema.teleconsultationRooms.id });
+
+      // Schedule reminders (30min and 5min before)
+      const scheduledTime = scheduledAt.getTime();
+      const now = Date.now();
+
+      const reminder30 = scheduledTime - 30 * 60 * 1000;
+      if (reminder30 > now) {
+        await teleconsultationReminderQueue.add('reminder-30min', {
+          teleconsultationId: room.id,
+          minutesBefore: 30,
+        }, { delay: reminder30 - now, removeOnComplete: 50 });
+      }
+
+      const reminder5 = scheduledTime - 5 * 60 * 1000;
+      if (reminder5 > now) {
+        await teleconsultationReminderQueue.add('reminder-5min', {
+          teleconsultationId: room.id,
+          minutesBefore: 5,
+        }, { delay: reminder5 - now, removeOnComplete: 50 });
+      }
+
+      const teleconsultaUrl = `${process.env.TELECONSULTA_BASE_URL || 'https://irb.saraiva.ai/consulta'}/${patientToken}`;
+
+      const dateFormatted = scheduledAt.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+      const timeFormatted = scheduledAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+      return JSON.stringify({
+        success: true,
+        url: teleconsultaUrl,
+        roomCode,
+        doctor: doctor.name,
+        specialty: doctor.specialty,
+        scheduledAt: `${dateFormatted} às ${timeFormatted}`,
+        message: `Link de teleconsulta criado! O paciente pode acessar pelo link: ${teleconsultaUrl}`,
+      });
+    }
+
     default:
       return JSON.stringify({ error: 'Unknown tool' });
   }
@@ -578,13 +708,20 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     console.error('RAG search failed, continuing without:', err);
   }
 
-  // 5. Build context for Claude (with RAG chunks injected)
+  // 5. Build context for Claude (with RAG chunks injected + active doctors)
   const knowledgeBase = await loadKnowledgeBase();
+  const activeDoctors = await db.select({
+    name: schema.doctors.name,
+    specialty: schema.doctors.specialty,
+    crm: schema.doctors.crm,
+  }).from(schema.doctors).where(eq(schema.doctors.isActive, true));
+
   const context = buildContext({
     conversation: conversation as any,
     knowledgeBase,
     patientInfo: patientName ? { name: patientName } : null,
     ragContext,
+    doctors: activeDoctors,
   });
 
   // 6. Call Claude
@@ -770,6 +907,11 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     sendJobData.interactive = interactiveHolder.message;
   } else {
     console.log('[AI-PIPELINE] No interactive message pending');
+  }
+
+  // If send_location tool was used, flag to send location
+  if (toolsUsed.includes('send_location')) {
+    (sendJobData as any).sendLocation = true;
   }
 
   await messageSendQueue.add('send', sendJobData, {

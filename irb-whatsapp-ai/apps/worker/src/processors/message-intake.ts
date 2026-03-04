@@ -339,7 +339,36 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
       }
     }
 
-     // 2.6. Transcribe audio if it's an audio message
+    // 2.6. Handle image/document/sticker — friendly response + buttons
+    const isMedia = ['imageMessage', 'imagem', 'image', 'documentMessage', 'documento', 'document', 'stickerMessage', 'sticker'].includes(messageType);
+    if (isMedia && !text && !buttonResponse) {
+      const existingConv = await ConversationModel.findOne({
+        patientPhone: normalizedPhone,
+        status: { $ne: 'closed' },
+      }).sort({ lastMessageAt: -1 });
+
+      if (existingConv) {
+        await messageSendQueue.add('send', {
+          conversationId: existingConv._id.toString(),
+          patientPhone: normalizedPhone,
+          text: 'Oi! Recebi seu arquivo, mas infelizmente nao consigo visualizar por aqui 😊\n\nMe descreve em texto o que voce precisa!',
+          instanceName,
+          interactive: {
+            type: 'buttons',
+            text: 'Como posso te ajudar?',
+            buttons: [
+              { id: 'media_agendar', text: 'Quero agendar' },
+              { id: 'media_duvida', text: 'Tirar duvida' },
+              { id: 'media_atendente', text: 'Falar com alguem' },
+            ],
+          },
+        }, { removeOnComplete: 100, removeOnFail: 500 });
+      }
+
+      return { status: 'media_response_sent', messageType };
+    }
+
+     // 2.7. Transcribe audio if it's an audio message
      const isAudio = (messageType === 'audioMessage' || messageType === 'audio') || !!audioUrl || !!audioMessageKey;
     if (isAudio && !text) {
       const transcribed = await transcribeAudio(audioUrl || null, audioMessageKey || null, instanceName);

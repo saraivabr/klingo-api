@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Melhoria na Integração Klingo | IRB Prime Care</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-2: #1a1a26;
+    --border: #2a2a3a;
+    --text: #e4e4ed;
+    --text-muted: #8888a0;
+    --accent: #6c5ce7;
+    --accent-light: #a29bfe;
+    --red: #ff4757;
+    --red-bg: rgba(255, 71, 87, 0.08);
+    --red-border: rgba(255, 71, 87, 0.2);
+    --green: #2ed573;
+    --green-bg: rgba(46, 213, 115, 0.08);
+    --green-border: rgba(46, 213, 115, 0.2);
+    --yellow: #ffa502;
+    --yellow-bg: rgba(255, 165, 2, 0.08);
+    --yellow-border: rgba(255, 165, 2, 0.2);
+    --blue: #3742fa;
+    --blue-bg: rgba(55, 66, 250, 0.08);
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 60px 32px 120px;
+  }
+
+  /* ---- HEADER ---- */
+  .header {
+    text-align: center;
+    margin-bottom: 72px;
+    position: relative;
+  }
+
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: -36px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent-light);
+    background: rgba(108, 92, 231, 0.1);
+    border: 1px solid rgba(108, 92, 231, 0.2);
+    padding: 6px 16px;
+    border-radius: 20px;
+    margin-bottom: 24px;
+  }
+
+  .header h1 {
+    font-size: 40px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1.15;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, #fff 30%, var(--accent-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .header p {
+    font-size: 17px;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .meta {
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+    margin-top: 24px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .meta span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ---- SECTIONS ---- */
+  section {
+    margin-bottom: 64px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent-light);
+    margin-bottom: 12px;
+  }
+
+  h2 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 24px;
+  }
+
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  p { margin-bottom: 16px; }
+
+  /* ---- PROBLEM CARDS ---- */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .problem-card {
+    background: var(--red-bg);
+    border: 1px solid var(--red-border);
+    border-radius: 14px;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .problem-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--red);
+    border-radius: 4px 0 0 4px;
+  }
+
+  .problem-card .severity {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--red);
+    background: rgba(255, 71, 87, 0.15);
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+
+  .problem-card h3 { color: #ffa0a8; }
+  .problem-card p { color: #ccc; margin-bottom: 0; }
+
+  /* ---- BEFORE/AFTER ---- */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 8px;
+  }
+
+  @media (max-width: 680px) {
+    .comparison { grid-template-columns: 1fr; }
+  }
+
+  .comp-card {
+    border-radius: 14px;
+    padding: 28px;
+    border: 1px solid;
+  }
+
+  .comp-card.before {
+    background: var(--red-bg);
+    border-color: var(--red-border);
+  }
+
+  .comp-card.after {
+    background: var(--green-bg);
+    border-color: var(--green-border);
+  }
+
+  .comp-card .tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 16px;
+  }
+
+  .comp-card.before .tag { color: var(--red); }
+  .comp-card.after .tag { color: var(--green); }
+
+  .comp-card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .comp-card li {
+    position: relative;
+    padding-left: 22px;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .comp-card li::before {
+    position: absolute;
+    left: 0;
+    top: 1px;
+    font-size: 13px;
+  }
+
+  .comp-card.before li::before { content: '\2717'; color: var(--red); }
+  .comp-card.after li::before { content: '\2713'; color: var(--green); }
+
+  /* ---- FLOW DIAGRAM ---- */
+  .flow {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px 32px;
+    margin: 24px 0;
+  }
+
+  .flow-steps {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .flow-step {
+    flex: 0 0 auto;
+    text-align: center;
+    padding: 20px 18px;
+    position: relative;
+  }
+
+  .flow-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin: 0 auto 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+
+  .flow-step .label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .flow-step .sublabel {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--accent-light);
+    font-size: 20px;
+    padding: 0 4px;
+    opacity: 0.5;
+  }
+
+  /* ---- SOLUTION CARDS ---- */
+  .solution-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  @media (max-width: 680px) {
+    .solution-grid { grid-template-columns: 1fr; }
+  }
+
+  .solution-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    transition: border-color 0.2s;
+  }
+
+  .solution-card:hover {
+    border-color: var(--accent);
+  }
+
+  .solution-card .icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 16px;
+  }
+
+  .solution-card h3 { font-size: 16px; }
+
+  .solution-card p {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 0;
+  }
+
+  .icon-purple { background: rgba(108, 92, 231, 0.15); }
+  .icon-green { background: rgba(46, 213, 115, 0.12); }
+  .icon-yellow { background: rgba(255, 165, 2, 0.12); }
+  .icon-blue { background: rgba(55, 66, 250, 0.12); }
+
+  /* ---- IMPACT NUMBERS ---- */
+  .impact-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0;
+  }
+
+  @media (max-width: 680px) {
+    .impact-row { grid-template-columns: 1fr; }
+  }
+
+  .impact-num {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    text-align: center;
+  }
+
+  .impact-num .number {
+    font-size: 40px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    background: linear-gradient(135deg, var(--green), #7bed9f);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+    margin-bottom: 6px;
+  }
+
+  .impact-num .desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  /* ---- TECH SECTION (for IT) ---- */
+  .tech-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px;
+    margin-top: 24px;
+  }
+
+  .tech-section h3 {
+    font-size: 15px;
+    color: var(--accent-light);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .file-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .file-table th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .file-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(42, 42, 58, 0.5);
+    color: var(--text-muted);
+  }
+
+  .file-table td:first-child {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .file-table tr:last-child td { border-bottom: none; }
+
+  .tag-new {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--green);
+    background: var(--green-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .tag-mod {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--yellow);
+    background: var(--yellow-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  /* ---- DEPLOY ---- */
+  .deploy-steps {
+    counter-reset: deploy;
+    list-style: none;
+    padding: 0;
+  }
+
+  .deploy-steps li {
+    counter-increment: deploy;
+    position: relative;
+    padding-left: 48px;
+    padding-bottom: 24px;
+    border-left: 2px solid var(--border);
+    margin-left: 16px;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .deploy-steps li:last-child {
+    border-left-color: transparent;
+    padding-bottom: 0;
+  }
+
+  .deploy-steps li::before {
+    content: counter(deploy);
+    position: absolute;
+    left: -15px;
+    top: -2px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .deploy-steps li strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* ---- FOOTER ---- */
+  .footer {
+    text-align: center;
+    margin-top: 80px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .footer a {
+    color: var(--accent-light);
+    text-decoration: none;
+  }
+
+  /* ---- RISK BOX ---- */
+  .risk-box {
+    background: var(--yellow-bg);
+    border: 1px solid var(--yellow-border);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin: 24px 0;
+  }
+
+  .risk-box h4 {
+    color: var(--yellow);
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .risk-box p {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 0;
+  }
+
+  /* ---- STATUS BADGE ---- */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 32px;
+    justify-content: center;
+  }
+
+  .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--green);
+    background: var(--green-bg);
+    border: 1px solid var(--green-border);
+    padding: 8px 20px;
+    border-radius: 24px;
+  }
+
+  .status-badge .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="badge">Infraestrutura &middot; Integracoes</div>
+    <h1>Melhoria na Integracao<br>com a Klingo API</h1>
+    <p>Correcao de falhas criticas na sincronizacao de agendamentos entre o sistema de WhatsApp e a Klingo, garantindo integridade dos dados da clinica.</p>
+    <div class="meta">
+      <span>26 de Fevereiro de 2026</span>
+      <span>&middot;</span>
+      <span>Fellipe Saraiva</span>
+      <span>&middot;</span>
+      <span>IRB Prime Care</span>
+    </div>
+  </header>
+
+  <!-- O PROBLEMA -->
+  <section>
+    <div class="section-label">O Problema</div>
+    <h2>Falhas silenciosas na integracao</h2>
+    <p style="color: var(--text-muted); max-width: 700px;">
+      A integracao entre o sistema de agendamento por WhatsApp e o Klingo (sistema da clinica) tinha bugs criticos que podiam passar despercebidos no dia a dia &mdash; mas com potencial de causar problemas serios.
+    </p>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="severity">Critico</div>
+        <h3>Agendamento fantasma</h3>
+        <p>Quando a API da Klingo falhava (instabilidade, timeout, erro de rede), o erro era <strong>engolido silenciosamente</strong>. O paciente recebia confirmacao no WhatsApp, mas o agendamento <strong>nao aparecia no sistema da clinica</strong>. A recepcionista nao via o paciente na agenda.</p>
+      </div>
+      <div class="problem-card">
+        <div class="severity">Critico</div>
+        <h3>Respostas falsas da API</h3>
+        <p>A API da Klingo pode retornar HTTP 200 (sucesso) mas com <strong>erro no corpo da resposta</strong>. O sistema nao verificava isso &mdash; tratava como sucesso. Alem disso, o retorno do <code>createBooking</code> nao era validado, podendo salvar um agendamento vazio.</p>
+      </div>
+      <div class="problem-card">
+        <div class="severity">Alto</div>
+        <h3>Slots ficticios sem aviso</h3>
+        <p>Quando a Klingo nao retornava horarios disponiveis, o sistema gerava <strong>slots fallback inventados</strong> (ex: 9h, 14h, 16h). O paciente agendava nesses horarios achando que estavam livres, mas podiam <strong>conflitar com consultas reais</strong>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- IMPACTO NO NEGOCIO -->
+  <section>
+    <div class="section-label">Impacto no Negocio</div>
+    <h2>O que isso significava na pratica</h2>
+
+    <div class="risk-box">
+      <h4>Cenario de risco real</h4>
+      <p>Paciente agenda pelo WhatsApp, recebe confirmacao, chega na clinica. A recepcionista nao encontra na agenda. Resultado: atendimento desorganizado, experiencia ruim, possivel perda do paciente, e retrabalho pra equipe.</p>
+    </div>
+
+    <div class="comparison">
+      <div class="comp-card before">
+        <div class="tag">Antes</div>
+        <ul>
+          <li>Falha na Klingo = erro ignorado</li>
+          <li>Paciente recebe "confirmado" mesmo sem agendamento real</li>
+          <li>Nenhuma tentativa de retry</li>
+          <li>Impossivel saber quais agendamentos falharam</li>
+          <li>Slots ficticios sem distincao</li>
+          <li>Equipe nao era notificada</li>
+        </ul>
+      </div>
+      <div class="comp-card after">
+        <div class="tag">Depois</div>
+        <ul>
+          <li>Falha na Klingo = 3 tentativas automaticas</li>
+          <li>Status de sync visivel (pending, synced, failed)</li>
+          <li>Retry com backoff exponencial (5s, 10s, 20s)</li>
+          <li>Erros registrados no banco com mensagem</li>
+          <li>Slots marcados como "klingo" ou "fallback"</li>
+          <li>Equipe notificada por WhatsApp em slots fallback</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMO FUNCIONA AGORA -->
+  <section>
+    <div class="section-label">Solucao</div>
+    <h2>Como funciona agora</h2>
+    <p style="color: var(--text-muted);">O agendamento local e salvo imediatamente (o paciente nao espera), e a sincronizacao com a Klingo acontece em segundo plano via fila de processamento.</p>
+
+    <div class="flow">
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="flow-icon">1</div>
+          <div class="label">Paciente confirma</div>
+          <div class="sublabel">Via link WhatsApp</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">
+          <div class="flow-icon">2</div>
+          <div class="label">Salva local</div>
+          <div class="sublabel">PostgreSQL + status</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">
+          <div class="flow-icon">3</div>
+          <div class="label">Enfileira sync</div>
+          <div class="sublabel">Fila BullMQ</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">
+          <div class="flow-icon">4</div>
+          <div class="label">Worker processa</div>
+          <div class="sublabel">Ate 3 tentativas</div>
+        </div>
+        <div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">
+          <div class="flow-icon" style="border-color: var(--green-border); background: var(--green-bg);">&#10003;</div>
+          <div class="label">Klingo sincronizado</div>
+          <div class="sublabel">Ou marcado como falha</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="solution-grid">
+      <div class="solution-card">
+        <div class="icon icon-purple">&#9881;</div>
+        <h3>Fila de Sincronizacao</h3>
+        <p>Cada agendamento vira um job na fila. Se falhar, tenta de novo automaticamente ate 3 vezes com intervalos crescentes.</p>
+      </div>
+      <div class="solution-card">
+        <div class="icon icon-green">&#10003;</div>
+        <h3>Validacao de Respostas</h3>
+        <p>Toda resposta da Klingo agora e verificada. Se vier "sucesso" com erro dentro, o sistema detecta e trata como falha.</p>
+      </div>
+      <div class="solution-card">
+        <div class="icon icon-yellow">&#9888;</div>
+        <h3>Slots com Origem</h3>
+        <p>Cada horario mostra se veio da Klingo (real) ou e fallback (estimado). Fallbacks geram status "pendente de confirmacao".</p>
+      </div>
+      <div class="solution-card">
+        <div class="icon icon-blue">&#9993;</div>
+        <h3>Alerta para Equipe</h3>
+        <p>Quando um agendamento e feito com slot fallback, a equipe recebe notificacao por WhatsApp para confirmar manualmente.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- METRICAS -->
+  <section>
+    <div class="section-label">Resultado</div>
+    <h2>O que muda na pratica</h2>
+
+    <div class="impact-row">
+      <div class="impact-num">
+        <div class="number">0</div>
+        <div class="desc">Agendamentos perdidos silenciosamente</div>
+      </div>
+      <div class="impact-num">
+        <div class="number">3x</div>
+        <div class="desc">Tentativas automaticas antes de marcar como falha</div>
+      </div>
+      <div class="impact-num">
+        <div class="number">100%</div>
+        <div class="desc">Visibilidade sobre o status de cada sync</div>
+      </div>
+    </div>
+
+    <p style="color: var(--text-muted); text-align: center; font-size: 14px;">
+      Cada appointment agora tem um campo <code>klingo_sync_status</code> que pode ser: <strong>pending</strong> (aguardando), <strong>synced</strong> (ok) ou <strong>failed</strong> (falhou). Isso permite dashboards e alertas futuros.
+    </p>
+  </section>
+
+  <!-- SETOR DE TI -->
+  <section>
+    <div class="section-label">Para o Setor de TI</div>
+    <h2>Detalhes tecnicos</h2>
+
+    <div class="tech-section">
+      <h3>&#128194; Arquivos modificados</h3>
+      <table class="file-table">
+        <thead>
+          <tr>
+            <th>Arquivo</th>
+            <th>Tipo</th>
+            <th>O que mudou</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>packages/database/.../schema.ts</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>+3 campos na tabela appointments (sync status, error, attempts)</td>
+          </tr>
+          <tr>
+            <td>packages/database/.../0001_*.sql</td>
+            <td><span class="tag-new">new</span></td>
+            <td>Migration SQL (ALTER TABLE, nao-destrutiva)</td>
+          </tr>
+          <tr>
+            <td>packages/shared/.../queues.ts</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>+fila KLINGO_SYNC com concurrency 2</td>
+          </tr>
+          <tr>
+            <td>apps/worker/.../klingo-sync.ts</td>
+            <td><span class="tag-new">new</span></td>
+            <td>Processor BullMQ: busca/cria paciente, cria booking, atualiza status</td>
+          </tr>
+          <tr>
+            <td>apps/worker/src/index.ts</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>Registra novo worker KLINGO_SYNC</td>
+          </tr>
+          <tr>
+            <td>apps/api/.../booking.ts</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>Inline Klingo removido, substituido por enqueue. Slots com source.</td>
+          </tr>
+          <tr>
+            <td>apps/api/.../klingo-client.ts</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>Validacao error-in-200, resposta vazia, logging</td>
+          </tr>
+          <tr>
+            <td>docker-compose.prod.yml</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>+KLINGO_LOGIN/SENHA/DOMAIN no servico worker</td>
+          </tr>
+          <tr>
+            <td>apps/sync-klingo/src/index.ts</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>Padronizacao env vars (aceita ambos formatos)</td>
+          </tr>
+          <tr>
+            <td>.env.example</td>
+            <td><span class="tag-mod">mod</span></td>
+            <td>Documentacao das variaveis Klingo</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="tech-section" style="margin-top: 16px;">
+      <h3>&#128640; Plano de deploy</h3>
+      <ol class="deploy-steps">
+        <li>
+          <strong>Rodar migration no Postgres</strong>
+          Adiciona colunas com valores padrao. Nao quebra nada existente. Appointments antigos ficam com status "pending" (nao afeta operacao).
+        </li>
+        <li>
+          <strong>Deploy do Worker primeiro</strong>
+          O worker fica idle ate receber jobs. Sem impacto.
+        </li>
+        <li>
+          <strong>Deploy da API</strong>
+          Novos bookings passam pela fila. Aparece no BullBoard para monitoramento.
+        </li>
+        <li>
+          <strong>Verificacao</strong>
+          Criar um booking de teste e verificar no BullBoard que o job klingo-sync aparece. Simular falha (env var errada) e confirmar que o status vai para "failed" apos 3 tentativas.
+        </li>
+      </ol>
+    </div>
+
+    <div class="risk-box" style="margin-top: 16px;">
+      <h4>Backward compatibility</h4>
+      <p>Nenhuma mudanca destrutiva. A migration apenas adiciona colunas. O frontend de agendamento (booking app) continua funcionando normalmente &mdash; o campo <code>slotSource</code> e opcional no POST. Se nao enviado, o comportamento e identico ao anterior.</p>
+    </div>
+  </section>
+
+  <!-- STATUS -->
+  <div class="status-row">
+    <div class="status-badge">
+      <span class="dot"></span>
+      Implementacao concluida &mdash; pronto para deploy
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>IRB Prime Care &middot; Relatorio Tecnico &middot; Fevereiro 2026</p>
+  </footer>
+
+</div>
+</body>
+</html>

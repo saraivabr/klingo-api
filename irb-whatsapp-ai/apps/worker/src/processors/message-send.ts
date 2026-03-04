@@ -34,6 +34,7 @@ interface SendJobData {
   patientPhone: string;
   text: string;
   interactive?: InteractiveMessage;
+  sendLocation?: boolean;
 }
 
 function calculateTypingDelay(text: string): number {
@@ -250,6 +251,68 @@ export async function processMessageSend(job: Job<SendJobData>) {
         lastAiMsg.messageId = lastMessageId;
         lastAiMsg.deliveryStatus = 'sent';
         await conversation.save();
+      }
+    }
+  }
+
+  // Send clinic location if requested via tool
+  if (job.data.sendLocation) {
+    try {
+      const locationDelay = 1500;
+      await sendPresence(phone, locationDelay);
+      await sleep(locationDelay);
+
+      const locationResponse = await fetch(`${UAZAPI_URL}/send/location`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'token': UAZAPI_TOKEN,
+        },
+        body: JSON.stringify({
+          number: phone,
+          latitude: -23.5437,
+          longitude: -46.6324,
+          name: 'IRB Prime Care',
+          address: 'Rua Boa Vista, 99 - 6º Andar, Centro, São Paulo - SP',
+        }),
+      });
+      if (!locationResponse.ok) {
+        console.error('[MESSAGE-SEND] Location send failed:', await locationResponse.text());
+      }
+    } catch (err) {
+      console.error('[MESSAGE-SEND] Location send error:', err);
+    }
+  }
+
+  // Send clinic location after booking confirmation (only if not already sent via sendLocation flag)
+  if (!job.data.sendLocation) {
+    const isBookingConfirmation = text.includes('confirmado') || text.includes('agendamento') || text.includes('Confirmado');
+    const hasInteractiveConfirmation = interactive?.text?.includes('otima decisao') || interactive?.text?.includes('Prontinho');
+    if (isBookingConfirmation || hasInteractiveConfirmation) {
+      try {
+        const locationDelay = 2000;
+        await sendPresence(phone, locationDelay);
+        await sleep(locationDelay);
+
+        const locationResponse = await fetch(`${UAZAPI_URL}/send/location`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'token': UAZAPI_TOKEN,
+          },
+          body: JSON.stringify({
+            number: phone,
+            latitude: -23.5437,
+            longitude: -46.6324,
+            name: 'IRB Prime Care',
+            address: 'Rua Boa Vista, 99 - 6º Andar, Centro, São Paulo - SP',
+          }),
+        });
+        if (!locationResponse.ok) {
+          console.error('[MESSAGE-SEND] Location send failed:', await locationResponse.text());
+        }
+      } catch (err) {
+        console.error('[MESSAGE-SEND] Location send error:', err);
       }
     }
   }

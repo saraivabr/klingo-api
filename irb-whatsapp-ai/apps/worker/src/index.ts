@@ -12,6 +12,10 @@ import { processAppointmentReminder } from './processors/appointment-reminder.js
 import { processKlingoSync } from './processors/klingo-sync.js';
 import { processAppointmentConfirmation } from './processors/appointment-confirmation.js';
 import { processNpsCollection } from './processors/nps-collection.js';
+import { processPaymentNotification } from './processors/payment-notification.js';
+import { processPaymentReminder } from './processors/payment-reminder.js';
+import { processTeleconsultationReminder } from './processors/teleconsultation-reminder.js';
+import { processTeleconsultationCleanup } from './processors/teleconsultation-cleanup.js';
 
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -64,6 +68,22 @@ async function start() {
       connection: redisConnection,
       concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.NPS_COLLECTION],
     }),
+    new Worker(QUEUE_NAMES.PAYMENT_NOTIFICATION, processPaymentNotification, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.PAYMENT_NOTIFICATION],
+    }),
+    new Worker(QUEUE_NAMES.PAYMENT_REMINDER, processPaymentReminder, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.PAYMENT_REMINDER],
+    }),
+    new Worker(QUEUE_NAMES.TELECONSULTATION_REMINDER, processTeleconsultationReminder, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.TELECONSULTATION_REMINDER],
+    }),
+    new Worker(QUEUE_NAMES.TELECONSULTATION_CLEANUP, processTeleconsultationCleanup, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.TELECONSULTATION_CLEANUP],
+    }),
   ];
 
   // Schedule repeatable booking cleanup job (every hour)
@@ -86,6 +106,22 @@ async function start() {
   const confirmationQueue = new Queue(QUEUE_NAMES.APPOINTMENT_CONFIRMATION, { connection: redisConnection });
   await confirmationQueue.add('daily-confirmation', {}, {
     repeat: { pattern: '0 17 * * *' }, // 17:00 UTC = 14:00 BRT
+    removeOnComplete: 10,
+    removeOnFail: 50,
+  });
+
+  // Schedule teleconsultation cleanup (every 30 minutes)
+  const teleconsultCleanupQueue = new Queue(QUEUE_NAMES.TELECONSULTATION_CLEANUP, { connection: redisConnection });
+  await teleconsultCleanupQueue.add('cleanup', {}, {
+    repeat: { every: 30 * 60 * 1000 }, // 30 minutes
+    removeOnComplete: 10,
+    removeOnFail: 50,
+  });
+
+  // Schedule daily payment reminder (every day at 10:00 BRT / 13:00 UTC)
+  const paymentReminderQueue = new Queue(QUEUE_NAMES.PAYMENT_REMINDER, { connection: redisConnection });
+  await paymentReminderQueue.add('daily-payment-reminder', {}, {
+    repeat: { pattern: '0 13 * * *' }, // 13:00 UTC = 10:00 BRT
     removeOnComplete: 10,
     removeOnFail: 50,
   });

@@ -41,17 +41,17 @@ services:
       timeout: 5s
       retries: 5
 
-   api:
-     build:
-       context: .
-       dockerfile: infra/docker/Dockerfile.api
-     container_name: irb-api
-     restart: always
-     ports:
-       - '127.0.0.1:3001:3001'
-     volumes:
-       - prescription_data:/data/prescriptions
-     environment:
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: irb-api
+    restart: always
+    ports:
+      - '127.0.0.1:3001:3001'
+    volumes:
+      - prescription_data:/data/prescriptions
+    environment:
       - NODE_ENV=production
       - API_PORT=3001
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}

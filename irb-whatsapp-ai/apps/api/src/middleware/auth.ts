@@ -1,0 +1,16 @@
+import { FastifyRequest, FastifyReply } from 'fastify';
+
+export async function authMiddleware(request: FastifyRequest, reply: FastifyReply) {
+  try {
+    await request.jwtVerify();
+  } catch (err) {
+    reply.status(401).send({ error: 'Unauthorized' });
+  }
+}
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: { userId: string; email: string; role: string };
+    user: { userId: string; email: string; role: string };
+  }
+}

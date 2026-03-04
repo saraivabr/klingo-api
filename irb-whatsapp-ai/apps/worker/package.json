@@ -1,0 +1,26 @@
+{
+  "name": "@irb/worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@irb/ai": "workspace:*",
+    "@irb/database": "workspace:*",
+    "@irb/shared": "workspace:*",
+    "bullmq": "^5.12.0",
+    "drizzle-orm": "^0.33.0",
+    "ioredis": "^5.4.0",
+    "nanoid": "^5.1.6"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

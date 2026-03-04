@@ -46,6 +46,7 @@ export const aiTools: OpenAI.ChatCompletionTool[] = [
           service_name: { type: 'string', description: 'Nome do serviço' },
           doctor_name: { type: 'string', description: 'Nome do médico' },
           date_time: { type: 'string', description: 'Data e hora no formato YYYY-MM-DD HH:mm' },
+          modality: { type: 'string', enum: ['presencial', 'teleconsulta'], description: 'Modalidade: presencial ou teleconsulta. Padrão: presencial' },
         },
         required: ['patient_name', 'service_name', 'date_time'],
       },
@@ -79,6 +80,22 @@ export const aiTools: OpenAI.ChatCompletionTool[] = [
           preferred_period: { type: 'string', enum: ['morning', 'afternoon', 'any'], description: 'Período preferido pelo paciente' },
         },
         required: ['specialty'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_teleconsultation_link',
+      description: 'Gera um link de teleconsulta (videochamada) para o paciente. Use quando o paciente preferir atendimento online, morar longe, ou quando a teleconsulta for mais adequada. O paciente recebe um link, clica, e entra na sala de espera virtual.',
+      parameters: {
+        type: 'object',
+        properties: {
+          specialty: { type: 'string', description: 'Especialidade médica (ex: Dermatologia, Cardiologia)' },
+          doctor_name: { type: 'string', description: 'Nome do médico, se o paciente especificou preferência' },
+          scheduled_at: { type: 'string', description: 'Data e hora agendada no formato YYYY-MM-DD HH:mm' },
+        },
+        required: ['specialty', 'scheduled_at'],
       },
     },
   },
@@ -194,6 +211,18 @@ export const aiTools: OpenAI.ChatCompletionTool[] = [
     function: {
       name: 'check_exam_results',
       description: 'Verifica se o paciente tem resultados de exames disponíveis. Use quando o paciente perguntar sobre resultados.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_location',
+      description: 'Envia a localização da clínica IRB Prime Care no mapa do WhatsApp. Use quando o paciente perguntar "como chegar", "onde fica", "endereço", ou após confirmar um agendamento. O paciente recebe um pin no mapa que pode abrir no Waze/Google Maps.',
       parameters: {
         type: 'object',
         properties: {},

@@ -1,0 +1,31 @@
+{
+  "name": "@irb/ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./claude": "./dist/claude/client.js",
+    "./prompts": "./dist/prompts/system.js",
+    "./classifiers": "./dist/classifiers/intent.js",
+    "./state-machine": "./dist/state-machine/machine.js",
+    "./context": "./dist/context/builder.js",
+    "./rag": "./dist/rag/search.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openai": "^4.70.0",
+    "postgres": "^3.4.0",
+    "@irb/shared": "workspace:*",
+    "@irb/database": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

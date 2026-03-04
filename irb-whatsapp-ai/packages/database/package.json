@@ -1,0 +1,38 @@
+{
+  "name": "@irb/database",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./postgres": "./dist/postgres/client.js",
+    "./mongo": "./dist/mongo/client.js",
+    "./redis": "./dist/redis/client.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx src/seed.ts",
+    "db:ingest": "tsx src/ingest-knowledge.ts",
+    "db:migrate:pgvector": "tsx src/migrate-pgvector.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.33.0",
+    "postgres": "^3.4.0",
+    "mongoose": "^8.5.0",
+    "ioredis": "^5.4.0",
+    "openai": "^4.70.0",
+    "@irb/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.24.0",
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0",
+    "dotenv": "^16.4.0"
+  }
+}

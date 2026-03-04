@@ -1,0 +1,61 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import './index.css';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import Chat from './pages/Chat';
+import Metrics from './pages/Metrics';
+import Settings from './pages/Settings';
+import Subscriptions from './pages/Subscriptions';
+import Finance from './pages/Finance';
+import Teleconsultation from './pages/Teleconsultation';
+import Schedules from './pages/Schedules';
+import OPDVisits from './pages/OPDVisits';
+import Billing from './pages/Billing';
+import LabTests from './pages/LabTests';
+import Pharmacy from './pages/Pharmacy';
+import WorkflowDashboard from './pages/WorkflowDashboard';
+import AppLayout from './components/layout/AppLayout';
+
+function App() {
+  const token = localStorage.getItem('token');
+
+  if (!token) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" />} />
+      </Routes>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route element={<AppLayout />}>
+         <Route path="/" element={<WorkflowDashboard />} />
+         <Route path="/conversations" element={<Dashboard />} />
+         <Route path="/schedules" element={<Schedules />} />
+         <Route path="/opd" element={<OPDVisits />} />
+         <Route path="/billing" element={<Billing />} />
+         <Route path="/lab" element={<LabTests />} />
+         <Route path="/pharmacy" element={<Pharmacy />} />
+         <Route path="/metrics" element={<Metrics />} />
+         <Route path="/subscriptions" element={<Subscriptions />} />
+         <Route path="/finance" element={<Finance />} />
+         <Route path="/teleconsulta" element={<Teleconsultation />} />
+         <Route path="/settings" element={<Settings />} />
+       </Route>
+       <Route path="/conversations/:id" element={<Chat />} />
+       <Route path="/login" element={<Login />} />
+     </Routes>
+   );
+}
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>
+);

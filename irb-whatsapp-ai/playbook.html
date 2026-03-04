@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IRB Prime Care - Playbook de Atendimento RAG</title>
+<style>
+  :root {
+    --primary: #0f62fe;
+    --primary-light: #e8f0fe;
+    --success: #198038;
+    --success-light: #defbe6;
+    --warning: #f1c21b;
+    --warning-light: #fdf6dd;
+    --danger: #da1e28;
+    --danger-light: #fff1f1;
+    --purple: #8a3ffc;
+    --purple-light: #f3eeff;
+    --teal: #009d9a;
+    --teal-light: #d9fbfb;
+    --gray-100: #f4f4f4;
+    --gray-200: #e0e0e0;
+    --gray-300: #c6c6c6;
+    --gray-600: #6f6f6f;
+    --gray-800: #393939;
+    --gray-900: #161616;
+    --radius: 12px;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f7f8fa;
+    color: var(--gray-900);
+    line-height: 1.6;
+  }
+
+  /* HEADER */
+  .header {
+    background: linear-gradient(135deg, #0f62fe 0%, #0043ce 100%);
+    color: white;
+    padding: 32px 0 80px;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 40px;
+    background: #f7f8fa;
+    border-radius: 40px 40px 0 0;
+  }
+  .header-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  .header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .header p {
+    opacity: 0.85;
+    font-size: 1rem;
+  }
+  .header-stats {
+    display: flex;
+    gap: 24px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+  }
+  .stat-card {
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius);
+    padding: 16px 24px;
+    min-width: 160px;
+  }
+  .stat-card .number {
+    font-size: 1.75rem;
+    font-weight: 700;
+  }
+  .stat-card .label {
+    font-size: 0.8rem;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* CONTAINER */
+  .container {
+    max-width: 1200px;
+    margin: -40px auto 40px;
+    padding: 0 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* SEARCH */
+  .search-box {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 20px 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .search-box svg { flex-shrink: 0; color: var(--gray-300); }
+  .search-box input {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-size: 1rem;
+    color: var(--gray-900);
+  }
+  .search-box input::placeholder { color: var(--gray-300); }
+  .search-count {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+    white-space: nowrap;
+  }
+
+  /* TABS NAV */
+  .tabs-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab-btn {
+    padding: 10px 18px;
+    border: none;
+    background: white;
+    color: var(--gray-600);
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    box-shadow: var(--shadow);
+  }
+  .tab-btn:hover { color: var(--primary); background: var(--primary-light); }
+  .tab-btn.active {
+    background: var(--primary);
+    color: white;
+    box-shadow: 0 4px 12px rgba(15,98,254,0.3);
+  }
+
+  /* SECTIONS */
+  .section {
+    display: none;
+    animation: fadeIn 0.3s ease;
+  }
+  .section.active { display: block; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* CARDS */
+  .card {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: var(--shadow-lg); }
+  .card h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card h3 .icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+
+  /* GRID */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+
+  /* TABLE */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  thead th {
+    background: var(--gray-100);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--gray-600);
+    border-bottom: 2px solid var(--gray-200);
+    position: sticky;
+    top: 0;
+  }
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  tbody tr:hover { background: var(--gray-100); }
+
+  /* BADGES */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge-blue { background: var(--primary-light); color: var(--primary); }
+  .badge-green { background: var(--success-light); color: var(--success); }
+  .badge-red { background: var(--danger-light); color: var(--danger); }
+  .badge-yellow { background: var(--warning-light); color: #946200; }
+  .badge-purple { background: var(--purple-light); color: var(--purple); }
+  .badge-teal { background: var(--teal-light); color: var(--teal); }
+
+  /* VALUE HIGHLIGHT */
+  .price {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--success);
+  }
+  .price-old {
+    font-size: 0.9rem;
+    color: var(--gray-300);
+    text-decoration: line-through;
+  }
+
+  /* INFO LIST */
+  .info-list { list-style: none; }
+  .info-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .info-list li:last-child { border-bottom: none; }
+  .info-list .key {
+    font-weight: 600;
+    min-width: 140px;
+    color: var(--gray-600);
+    font-size: 0.85rem;
+  }
+
+  /* FLOW */
+  .flow-step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 4px;
+    position: relative;
+  }
+  .flow-step::before {
+    content: '';
+    position: absolute;
+    left: 17px;
+    top: 36px;
+    bottom: -4px;
+    width: 2px;
+    background: var(--gray-200);
+  }
+  .flow-step:last-child::before { display: none; }
+  .flow-num {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    z-index: 1;
+  }
+  .flow-content {
+    flex: 1;
+    padding-bottom: 20px;
+  }
+  .flow-content h4 { font-size: 0.95rem; margin-bottom: 6px; }
+  .flow-content p { font-size: 0.85rem; color: var(--gray-600); }
+  .flow-msg {
+    background: var(--gray-100);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-top: 8px;
+    font-size: 0.85rem;
+    border-left: 3px solid var(--primary);
+    white-space: pre-line;
+  }
+
+  /* FAQ */
+  .faq-item {
+    border-bottom: 1px solid var(--gray-200);
+    cursor: pointer;
+  }
+  .faq-q {
+    padding: 16px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .faq-q .arrow {
+    transition: transform 0.2s;
+    font-size: 1.2rem;
+    color: var(--gray-300);
+  }
+  .faq-item.open .faq-q .arrow { transform: rotate(180deg); }
+  .faq-a {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s;
+  }
+  .faq-item.open .faq-a {
+    max-height: 300px;
+    padding-bottom: 16px;
+  }
+  .faq-a p {
+    background: var(--success-light);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--gray-800);
+  }
+
+  /* CHAT DEMO */
+  .chat-box {
+    background: #e5ddd5;
+    border-radius: var(--radius);
+    padding: 20px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .chat-msg {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    clear: both;
+    position: relative;
+    word-wrap: break-word;
+  }
+  .chat-msg.user {
+    background: white;
+    float: left;
+    border-bottom-left-radius: 4px;
+  }
+  .chat-msg.bot {
+    background: #dcf8c6;
+    float: right;
+    border-bottom-right-radius: 4px;
+  }
+  .chat-msg::after { content: ''; display: table; clear: both; }
+  .chat-clear { clear: both; }
+  .chat-label {
+    font-size: 0.7rem;
+    color: var(--gray-600);
+    margin-bottom: 2px;
+  }
+
+  /* TREE */
+  .tree { padding-left: 0; }
+  .tree-node {
+    padding: 8px 16px;
+    border-left: 3px solid var(--gray-200);
+    margin-left: 16px;
+    margin-bottom: 4px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-radius: 0 8px 8px 0;
+    transition: all 0.2s;
+  }
+  .tree-node:hover { background: var(--primary-light); border-left-color: var(--primary); }
+  .tree-node.root {
+    margin-left: 0;
+    border-left: 3px solid var(--primary);
+    font-weight: 600;
+    background: var(--primary-light);
+  }
+  .tree-children { display: none; }
+  .tree-node.expanded + .tree-children { display: block; }
+
+  /* DONUT */
+  .donut-wrap {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .donut-chart {
+    width: 180px;
+    height: 180px;
+    position: relative;
+  }
+  .donut-chart svg { transform: rotate(-90deg); }
+  .donut-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+  }
+  .donut-center .pct { font-size: 1.8rem; font-weight: 700; color: var(--success); }
+  .donut-center .lbl { font-size: 0.7rem; color: var(--gray-600); }
+  .donut-legend { list-style: none; }
+  .donut-legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+  }
+  .donut-legend .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* METRIC BAR */
+  .metric-bar {
+    height: 8px;
+    background: var(--gray-200);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .metric-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 1s ease;
+  }
+
+  /* COPY BTN */
+  .copy-btn {
+    background: none;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: var(--gray-600);
+    transition: all 0.2s;
+  }
+  .copy-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .copy-btn.copied { border-color: var(--success); color: var(--success); }
+
+  /* RESPONSIVE */
+  @media (max-width: 768px) {
+    .header h1 { font-size: 1.4rem; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .tabs-nav { gap: 6px; }
+    .tab-btn { padding: 8px 12px; font-size: 0.8rem; }
+    .container { padding: 0 12px; }
+    .card { padding: 16px; }
+  }
+
+  .highlight { background: #fff3cd; padding: 2px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-inner">
+    <h1>IRB Prime Care - Playbook RAG</h1>
+    <p>Knowledge Base completa para atendimento autonomo via WhatsApp</p>
+    <div class="header-stats">
+      <div class="stat-card">
+        <div class="number">21.852</div>
+        <div class="label">Mensagens analisadas</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">1.332</div>
+        <div class="label">Conversas</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">~75%</div>
+        <div class="label">Resolucao pela IA</div>
+      </div>
+      <div class="stat-card">
+        <div class="number">17</div>
+        <div class="label">Intents mapeados</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CONTAINER -->
+<div class="container">
+
+  <!-- SEARCH -->
+  <div class="search-box">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+    <input type="text" id="searchInput" placeholder="Buscar no playbook... (ex: valor, convenio, agendamento)">
+    <span class="search-count" id="searchCount"></span>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs-nav" id="tabsNav">
+    <button class="tab-btn active" data-tab="clinica">Clinica</button>
+    <button class="tab-btn" data-tab="precos">Precos</button>
+    <button class="tab-btn" data-tab="planos">Planos</button>
+    <button class="tab-btn" data-tab="pagamento">Pagamento</button>
+    <button class="tab-btn" data-tab="medicos">Medicos</button>
+    <button class="tab-btn" data-tab="exames">Exames</button>
+    <button class="tab-btn" data-tab="resultados">Resultados</button>
+    <button class="tab-btn" data-tab="fluxos">Fluxos</button>
+    <button class="tab-btn" data-tab="faq">FAQ</button>
+    <button class="tab-btn" data-tab="regras">Regras</button>
+    <button class="tab-btn" data-tab="ia-vs-humano">IA vs Humano</button>
+    <button class="tab-btn" data-tab="arvore">Arvore</button>
+    <button class="tab-btn" data-tab="exemplos">Exemplos</button>
+    <button class="tab-btn" data-tab="intents">Intents</button>
+  </div>
+
+  <!-- ======================= CLINICA ======================= -->
+  <div class="section active" id="sec-clinica" data-searchable>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--primary-light);color:var(--primary)">&#127973;</span> Identidade</h3>
+        <ul class="info-list">
+          <li><span class="key">Nome</span><span>IRB Prime Care</span></li>
+          <li><span class="key">Tipo</span><span>Clinica medica multiespecialidade (particular)</span></li>
+          <li><span class="key">Modalidades</span><span><span class="badge badge-blue">Presencial</span> <span class="badge badge-teal">Telemedicina</span></span></li>
+          <li><span class="key">Site</span><span><a href="https://www.irbprimecare.com.br" target="_blank">irbprimecare.com.br</a></span></li>
+          <li><span class="key">Portal Paciente</span><span><a href="https://portal-irb.klingo.app" target="_blank">portal-irb.klingo.app</a></span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--success-light);color:var(--success)">&#128205;</span> Endereco</h3>
+        <ul class="info-list">
+          <li><span class="key">Endereco 1</span><span>Rua Boa Vista, 99 - 6o Andar</span></li>
+          <li><span class="key">Endereco 2</span><span>Rua Quinze de Novembro, 212 - 6o Andar</span></li>
+          <li><span class="key">Cidade</span><span>Sao Paulo, SP 01013-915</span></li>
+          <li><span class="key">Referencia</span><span>Acima da 25 de Marco, proximo ao Metro Sao Bento</span></li>
+          <li><span class="key">Nota</span><span style="font-style:italic;color:var(--gray-600)">Os 2 enderecos sao entradas diferentes do mesmo predio</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--teal-light);color:var(--teal)">&#128338;</span> Horario de Funcionamento</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Dia</th><th>Horario</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td>Segunda</td><td>07:00 - 19:00</td><td><span class="badge badge-green">Aberto</span></td></tr>
+              <tr><td>Terca</td><td>07:00 - 19:00</td><td><span class="badge badge-green">Aberto</span></td></tr>
+              <tr><td>Quarta</td><td>07:00 - 19:00</td><td><span class="badge badge-green">Aberto</span></td></tr>
+              <tr><td>Quinta</td><td>07:00 - 19:00</td><td><span class="badge badge-green">Aberto</span></td></tr>
+              <tr><td>Sexta</td><td>07:00 - 19:00</td><td><span class="badge badge-green">Aberto</span></td></tr>
+              <tr><td>Sabado</td><td>-</td><td><span class="badge badge-red">Fechado</span></td></tr>
+              <tr><td>Domingo</td><td>-</td><td><span class="badge badge-red">Fechado</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--purple-light);color:var(--purple)">&#128222;</span> Contato e Pagamento</h3>
+        <ul class="info-list">
+          <li><span class="key">Chave PIX</span><span>ceo@irbprimecare.com.br <button class="copy-btn" onclick="copyText('ceo@irbprimecare.com.br',this)">Copiar</button></span></li>
+          <li><span class="key">Metodos</span><span>PIX, Cartao de credito, Boleto</span></li>
+          <li><span class="key">Parcelamento</span><span>Ate 3x sem juros no cartao</span></li>
+          <li><span class="key">Convenio</span><span><span class="badge badge-red">NAO aceita</span> (particular c/ reembolso)</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= PRECOS ======================= -->
+  <div class="section" id="sec-precos" data-searchable>
+    <div class="card">
+      <h3><span class="icon" style="background:var(--success-light);color:var(--success)">&#128176;</span> Tabela de Precos - Consultas</h3>
+      <p style="margin-bottom:12px;color:var(--gray-600);font-size:0.85rem">Todas as consultas possuem <strong>retorno gratuito em 30 dias</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Especialidade</th><th>Valor</th></tr></thead>
+          <tbody id="priceTable">
+            <tr><td>Consulta com especialista (todas)</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Cardiologista</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Neurologista</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Urologista</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Cirurgiao Vascular</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Reumatologista</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Psiquiatra</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Clinico Geral</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Gastroenterologista</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Endocrinologista</td><td><strong style="color:var(--success)">R$ 149,90</strong></td></tr>
+            <tr><td>Avaliacao Estetica</td><td><strong style="color:var(--teal)">R$ 89,90</strong> <span style="font-size:0.8rem;color:var(--gray-600)">(verificar gratuidade 1a consulta)</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3><span class="icon" style="background:var(--teal-light);color:var(--teal)">&#129656;</span> Tabela de Precos - Exames</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Exame</th><th>Valor</th></tr></thead>
+          <tbody>
+            <tr><td>Ecocardiograma</td><td><strong style="color:var(--success)">R$ 199,90</strong></td></tr>
+            <tr><td>Tomografia</td><td><strong style="color:var(--success)">R$ 199,90</strong></td></tr>
+            <tr><td>ECG - Eletrocardiograma</td><td><strong style="color:var(--success)">R$ 99,00</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:12px;font-size:0.85rem;color:var(--gray-600)">Exames tem valores separados das consultas.</p>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3><span class="icon" style="background:var(--danger-light);color:var(--danger)">&#127881;</span> Pacotes Promocionais (Fev/2026)</h3>
+      <div class="grid-3">
+        <div style="background:var(--primary-light);border-radius:var(--radius);padding:20px">
+          <div style="font-weight:700;margin-bottom:4px">Recovery Pos-Bloco</div>
+          <div class="price-old">R$ 422,54</div>
+          <div class="price">R$ 299,90</div>
+          <p style="font-size:0.8rem;margin-top:8px;color:var(--gray-600)">Consulta + hemograma + ureia + creatinina + sodio + potassio + magnesio + vit D + vit B12 + TGO/TGP + Gama GT + FA + colesterol + triglicerides + PCR + US abdome</p>
+        </div>
+        <div style="background:var(--purple-light);border-radius:var(--radius);padding:20px">
+          <div style="font-weight:700;margin-bottom:4px">Sexo Seguro</div>
+          <div class="price-old">R$ 261,00</div>
+          <div class="price">R$ 119,90</div>
+          <p style="font-size:0.8rem;margin-top:8px;color:var(--gray-600)">HIV + AntiHCV + HBsAg + AntiHBs + AntiHBc + VDRL + FTABS (IgM e IgG)</p>
+        </div>
+        <div style="background:var(--danger-light);border-radius:var(--radius);padding:20px">
+          <div style="font-weight:700;margin-bottom:4px">Coracao na Batida</div>
+          <div class="price-old">R$ 399,90</div>
+          <div class="price">R$ 249,90</div>
+          <p style="font-size:0.8rem;margin-top:8px;color:var(--gray-600)">Ecocardiograma + ECG + teste ergometrico</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= PLANOS ======================= -->
+  <div class="section" id="sec-planos" data-searchable>
+    <div class="grid-2">
+      <div class="card" style="border-top:4px solid var(--primary)">
+        <h3>&#128241; Teleprime - Mensal Flexivel</h3>
+        <div class="price" style="font-size:2rem">R$ 14,90<span style="font-size:0.9rem;font-weight:400;color:var(--gray-600)">/mes</span></div>
+        <p style="margin:12px 0;font-size:0.9rem;color:var(--gray-600)">Cancela a qualquer momento, sem burocracia</p>
+        <ul style="list-style:none;font-size:0.85rem">
+          <li style="padding:6px 0">&#10003; Consultas ilimitadas 24h</li>
+          <li style="padding:6px 0">&#10003; Clinico geral + Pediatra</li>
+          <li style="padding:6px 0">&#10003; Encaminhamento p/ especialista</li>
+          <li style="padding:6px 0">&#10003; Todo o Brasil</li>
+          <li style="padding:6px 0">&#10003; App iOS e Android</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:4px solid var(--purple)">
+        <h3>&#11088; Teleprime - Anual Vantajoso</h3>
+        <div class="price" style="font-size:2rem">R$ 9,90<span style="font-size:0.9rem;font-weight:400;color:var(--gray-600)">/mes</span></div>
+        <p style="margin:12px 0;font-size:0.9rem;color:var(--gray-600)">Contrato anual. Multa de 3 meses se cancelar antes.</p>
+        <ul style="list-style:none;font-size:0.85rem">
+          <li style="padding:6px 0">&#10003; Tudo do plano mensal</li>
+          <li style="padding:6px 0">&#10003; Economia de 33%</li>
+          <li style="padding:6px 0">&#10003; R$ 118,80/ano</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Como Ativar o Teleprime</h3>
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><h4>Comprar no site</h4><p>irbprimecare.com.br, area de venda</p></div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><h4>Receber credenciais</h4><p>Em ate 4 dias uteis, recebe login e senha</p></div></div>
+      <div class="flow-step"><div class="flow-num">3</div><div class="flow-content"><h4>Baixar o app</h4><p>"IRB Prime Care" na Apple Store ou Google Play</p></div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-content"><h4>Usar!</h4><p>Login com CPF, sem limitacao de consultas</p></div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Planos Fidelidade</h3>
+      <p style="font-size:0.9rem;color:var(--gray-600)">A partir de <strong>R$ 100,00/mes</strong> com descontos em consultas e exames. Detalhes em: <a href="https://www.irbprimecare.com.br/category/plano-fidelidade" target="_blank">irbprimecare.com.br/planos</a></p>
+    </div>
+  </div>
+
+  <!-- ======================= PAGAMENTO ======================= -->
+  <div class="section" id="sec-pagamento" data-searchable>
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="icon" style="background:var(--success-light);color:var(--success)">&#128179;</span> Formas de Pagamento</h3>
+        <ul class="info-list">
+          <li><span class="key">PIX</span><span>ceo@irbprimecare.com.br <button class="copy-btn" onclick="copyText('ceo@irbprimecare.com.br',this)">Copiar</button></span></li>
+          <li><span class="key">Cartao</span><span>Credito (presencial ou online)</span></li>
+          <li><span class="key">Boleto</span><span>Via sistema ASSAS</span></li>
+          <li><span class="key">Parcelamento</span><span>Ate 3x sem juros no cartao</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3><span class="icon" style="background:var(--danger-light);color:var(--danger)">&#9888;</span> Convenios</h3>
+        <div style="background:var(--danger-light);border-radius:8px;padding:16px;margin-bottom:12px">
+          <strong style="color:var(--danger)">NAO aceita convenios externos</strong>
+          <p style="font-size:0.85rem;margin-top:4px">(Amil, SulAmerica, Hapvida, etc.)</p>
+        </div>
+        <div style="background:var(--success-light);border-radius:8px;padding:16px">
+          <strong style="color:var(--success)">Possibilidade de reembolso</strong>
+          <p style="font-size:0.85rem;margin-top:4px">Paciente pode solicitar reembolso ao seu plano de saude</p>
+        </div>
+        <div class="flow-msg" style="margin-top:12px">
+          <strong>Resposta padrao:</strong><br>
+          "Informamos que nao aceitamos convenios, porem o atendimento pode ser realizado de forma particular com possibilidade de reembolso pelo seu plano."
+          <button class="copy-btn" style="margin-top:8px" onclick="copyText('Informamos que nao aceitamos convenios, porem o atendimento pode ser realizado de forma particular com possibilidade de reembolso pelo seu plano.',this)">Copiar resposta</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>&#128187; Pagamento Telemedicina</h3>
+        <p style="font-size:0.9rem">Pagamento deve ser feito <strong>ate 1 hora antes</strong> da consulta para liberacao do link.</p>
+        <p style="font-size:0.85rem;color:var(--gray-600);margin-top:8px">Aceita: PIX, cartao de credito e boleto.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= MEDICOS ======================= -->
+  <div class="section" id="sec-medicos" data-searchable>
+    <div class="card">
+      <h3><span class="icon" style="background:var(--primary-light);color:var(--primary)">&#129658;</span> Corpo Clinico</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Medico</th><th>Especialidade</th><th>Modalidade</th></tr></thead>
+          <tbody>
+            <tr><td>Dr. Flavio Barbieri</td><td>Clinica Medica / Diretor Clinico</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dra. Natalia Mucare</td><td>Cardiologista</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dr. Pedro Cardoso</td><td>Urologista</td><td><span class="badge badge-blue">Presencial</span> <span class="badge badge-teal">Telemedicina</span></td></tr>
+            <tr><td>Dr. Angelo Campos</td><td>Neurologista</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dra. Karla Souza</td><td>Reumatologista</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dr. Rodrigo Favoreto</td><td>Ultrassonografia</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dr. Lucas Rodrigues</td><td>Ultrassonografia</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dr. Eduardo Marim</td><td>Cirurgiao Vascular</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dra. Maira G. Melo</td><td>Psiquiatria</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dra. Thalita Goulart</td><td>Odontologia / Bucomaxilofacial</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dra. Natalia Barbosa</td><td>Estetica</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+            <tr><td>Dra. Beatriz</td><td>Pediatra</td><td><span class="badge badge-teal">Telemedicina</span></td></tr>
+            <tr><td>Enfermeira Vivian</td><td>Enfermagem / Contraste</td><td><span class="badge badge-blue">Presencial</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Especialidades Oferecidas</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <span class="badge badge-blue">Cardiologia</span>
+        <span class="badge badge-blue">Neurologia</span>
+        <span class="badge badge-blue">Urologia</span>
+        <span class="badge badge-blue">Reumatologia</span>
+        <span class="badge badge-blue">Cirurgia Vascular</span>
+        <span class="badge badge-blue">Psiquiatria</span>
+        <span class="badge badge-blue">Clinica Medica</span>
+        <span class="badge badge-blue">Gastroenterologia</span>
+        <span class="badge badge-blue">Endocrinologia</span>
+        <span class="badge badge-blue">Dermatologia</span>
+        <span class="badge badge-blue">Ortopedia</span>
+        <span class="badge badge-blue">Oftalmologia</span>
+        <span class="badge badge-teal">Pediatria (telemedicina)</span>
+        <span class="badge badge-purple">Odontologia</span>
+        <span class="badge badge-purple">Estetica</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= EXAMES ======================= -->
+  <div class="section" id="sec-exames" data-searchable>
+    <div class="grid-2">
+      <div class="card">
+        <h3>&#128444; Exames de Imagem</h3>
+        <ul class="info-list">
+          <li><span class="key">Tomografia</span><span>Com e sem contraste (abdome, ATM c/ 3D)</span></li>
+          <li><span class="key">Ultrassom</span><span>Abdome, ombro, escrotal, Doppler carotidas/venoso, eco</span></li>
+          <li><span class="key">Raio-X</span><span>Diversas incidencias (bacia, torax, etc)</span></li>
+        </ul>
+        <div style="background:var(--danger-light);border-radius:8px;padding:12px;margin-top:12px;font-size:0.85rem">
+          <strong style="color:var(--danger)">NAO realizam:</strong> Angiotomografias, Endoscopia, Ressonancia magnetica
+        </div>
+      </div>
+      <div class="card">
+        <h3>&#10084; Exames Cardiologicos</h3>
+        <ul class="info-list">
+          <li><span class="key">ECG</span><span>2a a 6a, 07h-18h</span></li>
+          <li><span class="key">Ecocardiograma</span><span>Transtoracico</span></li>
+          <li><span class="key">Holter</span><span>24h, 3 canais digital</span></li>
+          <li><span class="key">MAPA</span><span>Monitoramento pressao arterial</span></li>
+          <li><span class="key">Teste Ergometrico</span><span>Teste de esforco</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>&#129514; Laboratorio Proprio</h3>
+        <ul style="list-style:none;font-size:0.85rem;columns:2;column-gap:20px">
+          <li style="padding:3px 0">&#8226; Hemograma</li>
+          <li style="padding:3px 0">&#8226; Ureia / Creatinina</li>
+          <li style="padding:3px 0">&#8226; Sodio / Potassio / Magnesio</li>
+          <li style="padding:3px 0">&#8226; Vitamina D / B12</li>
+          <li style="padding:3px 0">&#8226; TGO / TGP / Gama GT / FA</li>
+          <li style="padding:3px 0">&#8226; LDL / HDL / Colesterol / Triglicerides</li>
+          <li style="padding:3px 0">&#8226; PCR</li>
+          <li style="padding:3px 0">&#8226; HIV</li>
+          <li style="padding:3px 0">&#8226; Hepatites (HBs, HBc, HCV)</li>
+          <li style="padding:3px 0">&#8226; VDRL / FTABS (sifilis)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>&#9888; Protocolos de Contraste</h3>
+        <ul class="info-list" style="font-size:0.85rem">
+          <li><span>Requer presenca do <strong>Dr. Flavio</strong> e <strong>Enfermeira Vivian</strong></span></li>
+          <li><span>Paciente precisa de <strong>ureia e creatinina atuais</strong></span></li>
+          <li><span>Contraste: <strong>Ultravist</strong> (verificar compatibilidade)</span></li>
+          <li><span>Se houver risco, medico avalia <strong>sem custo adicional</strong></span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= RESULTADOS ======================= -->
+  <div class="section" id="sec-resultados" data-searchable>
+    <div class="grid-2">
+      <div class="card">
+        <h3>&#9200; Prazos de Resultados</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tipo</th><th>Prazo</th></tr></thead>
+            <tbody>
+              <tr><td>Imagens de exame</td><td><span class="badge badge-green">Na hora</span></td></tr>
+              <tr><td>Laudo de imagem</td><td><span class="badge badge-blue">24 horas</span></td></tr>
+              <tr><td>ECG</td><td><span class="badge badge-blue">24 horas</span></td></tr>
+              <tr><td>Holter / MAPA</td><td><span class="badge badge-yellow">Ate 48 horas</span></td></tr>
+              <tr><td>Exames laboratoriais</td><td><span class="badge badge-purple">Ate 7 dias uteis</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h3>&#128187; Portal do Paciente</h3>
+        <ul class="info-list">
+          <li><span class="key">Link</span><span><a href="https://portal-irb.klingo.app" target="_blank">portal-irb.klingo.app</a></span></li>
+          <li><span class="key">Acesso</span><span>Login e senha fornecidos apos exames</span></li>
+          <li><span class="key">Conteudo</span><span>Laudos e imagens quando liberados</span></li>
+          <li><span class="key">Dica</span><span>"Esqueci minha senha" disponivel</span></li>
+        </ul>
+        <div class="flow-msg" style="margin-top:12px;font-size:0.8rem">
+          <strong>Sobre laudos:</strong> "A emissao do laudo e conduta exclusivamente medica. Nao e possivel garantir que o laudo sera exatamente igual ao solicitado."
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= FLUXOS ======================= -->
+  <div class="section" id="sec-fluxos" data-searchable>
+    <div class="card">
+      <h3><span class="icon" style="background:var(--primary-light);color:var(--primary)">1</span> Fluxo de Primeiro Contato</h3>
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><h4>Saudacao</h4><div class="flow-msg">"Ola! Voce entrou em contato com a IRB Prime Care.
+Me chamo [NOME] e estarei dando continuidade ao seu atendimento.
+Fico a disposicao para esclarecer qualquer duvida e ajudar no que for necessario."</div></div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><h4>Identificar necessidade</h4><div class="flow-msg">"Qual seria a especialidade desejada?"</div></div></div>
+      <div class="flow-step"><div class="flow-num">3</div><div class="flow-content"><h4>Informar valor</h4><div class="flow-msg">"Consulta com especialista por R$149,90! Agende hoje mesmo."</div></div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-content"><h4>Se perguntar convenio</h4><div class="flow-msg">"Informamos que nao aceitamos convenios, porem o atendimento pode ser realizado de forma particular com possibilidade de reembolso pelo seu plano."</div></div></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="icon" style="background:var(--success-light);color:var(--success)">2</span> Fluxo de Agendamento</h3>
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><h4>Coletar dados</h4><div class="flow-msg">"Para realizarmos o agendamento, poderia me informar:
+- Nome completo:
+- Data de nascimento:
+- CPF:
+- Telefone:
+- E-mail:"</div></div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><h4>Verificar agenda</h4><p>Consultar API Klingo: agendas.listar / marcacoes.listar</p></div></div>
+      <div class="flow-step"><div class="flow-num">3</div><div class="flow-content"><h4>Oferecer horarios</h4><div class="flow-msg">"Temos disponivel no dia XX/XX entre HH:MM e HH:MM. Qual o melhor horario?"</div></div></div>
+      <div class="flow-step"><div class="flow-num">4</div><div class="flow-content"><h4>Confirmar</h4><div class="flow-msg">"Prezado(a) [NOME]
+Confirmacao de marcacao:
+> [PROCEDIMENTO]
+> Dr(a) [MEDICO]
+> [DATA] as [HORA]
+> IRB PRIME CARE
+
+Podemos confirmar?"</div></div></div>
+      <div class="flow-step"><div class="flow-num">5</div><div class="flow-content"><h4>Pagamento</h4><div class="flow-msg">"Pode pagar na hora. Aceitamos PIX, cartao de credito e boleto."</div></div></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="icon" style="background:var(--warning-light);color:#946200">3</span> Confirmacao de Agenda (dia anterior)</h3>
+      <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><h4>Confirmar com medico</h4><div class="flow-msg">"Bom dia Dr(a). [NOME], tudo bem?
+Confirmacao de agenda - IRB Prime Care
+-Medico(a): [NOME]
+-Dia: [DATA]
+-Horario: [HORARIOS]
+-Especialidade: [ESPECIALIDADE]
+Gentileza confirmar. Obrigado."</div></div></div>
+      <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><h4>Confirmar com paciente</h4><div class="flow-msg">"Boa tarde [NOME], podemos confirmar sua consulta?"</div></div></div>
+    </div>
+
+    <div class="card">
+      <h3><span class="icon" style="background:var(--teal-light);color:var(--teal)">4</span> Telemedicina / Resultados / Endereco / Encerramento</h3>
+      <div class="grid-2" style="margin-top:12px">
+        <div class="flow-msg"><strong>Telemedicina:</strong><br>"O pagamento precisa ser feito ate 1 hora antes da consulta para liberacao do link. Aceitamos PIX, cartao de credito e boleto."</div>
+        <div class="flow-msg"><strong>Resultados:</strong><br>"ECG: 24h / Laboratoriais: ate 7 dias uteis. Acesse: portal-irb.klingo.app"</div>
+        <div class="flow-msg"><strong>Endereco:</strong><br>"Rua Boa Vista, 99 - 6o Andar (ou Rua Quinze de Novembro, 212 - 6o Andar), SP. Proximo ao Metro Sao Bento."</div>
+        <div class="flow-msg"><strong>Encerramento:</strong><br>"Ficamos a disposicao para qualquer duvida. Agradecemos a confianca e a preferencia."</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= FAQ ======================= -->
+  <div class="section" id="sec-faq" data-searchable>
+    <div class="card">
+      <h3>&#10067; Perguntas Frequentes</h3>
+      <div id="faqList">
+        <div class="faq-item"><div class="faq-q">Aceita convenio? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Nao aceitamos convenios, porem o atendimento pode ser realizado de forma particular com possibilidade de reembolso pelo seu plano.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Qual o valor da consulta? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Consulta com especialista por R$149,90, com retorno no periodo de 30 dias.</p></div></div>
+        <div class="faq-item"><div class="faq-q">O exame ja esta incluso na consulta? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Nao, o exame tem valor separado da consulta.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Preciso de pedido medico para exame? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Para exames de imagem e laboratoriais, sim. Se nao tiver, pode agendar consulta com o especialista que ele solicita os exames.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Quando sai o resultado do exame? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Imagens na hora, laudo em 24h, laboratoriais ate 7 dias uteis. Acesse pelo Portal do Paciente: portal-irb.klingo.app</p></div></div>
+        <div class="faq-item"><div class="faq-q">Posso pagar na hora? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Sim! Aceitamos PIX, cartao de credito e boleto. Parcelamos em ate 3x sem juros no cartao.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Qual o horario de funcionamento? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Segunda a sexta, das 07:00 as 19:00. Sabado e domingo: fechado.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Fazem exame admissional? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Sim, realizamos exames admissionais e demissionais.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Voces fazem laudo? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Sim, porem a emissao do laudo e conduta exclusivamente medica, realizada de acordo com a avaliacao clinica e achados do exame.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Fazem tomografia com contraste? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>Sim, realizamos todos os exames com contraste (exceto angiotomografias). E necessario exames de ureia e creatinina atuais.</p></div></div>
+        <div class="faq-item"><div class="faq-q">Quando posso fazer ECG? <span class="arrow">&#9660;</span></div><div class="faq-a"><p>De segunda a sexta, das 07h00 as 18h00.</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= REGRAS ======================= -->
+  <div class="section" id="sec-regras" data-searchable>
+    <div class="card">
+      <h3>&#128220; Regras de Negocio</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Regra</th><th>Detalhe</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><strong>Retorno gratuito</strong></td><td>Consultas tem retorno no periodo de 30 dias</td></tr>
+            <tr><td>2</td><td><strong>Sem convenio</strong></td><td>Particular com possibilidade de reembolso</td></tr>
+            <tr><td>3</td><td><strong>Agendamento obrigatorio</strong></td><td>Nao atende por ordem de chegada</td></tr>
+            <tr><td>4</td><td><strong>Avaliacao pre-exame</strong></td><td>Medico avalia risco sem custo adicional</td></tr>
+            <tr><td>5</td><td><strong>Teleprime ativacao</strong></td><td>Ate 4 dias uteis apos compra</td></tr>
+            <tr><td>6</td><td><strong>Parcelamento</strong></td><td>Ate 3x sem juros no cartao</td></tr>
+            <tr><td>7</td><td><strong>Telemedicina</strong></td><td>Pagamento ate 1h antes da consulta</td></tr>
+            <tr><td>8</td><td><strong>Portal do Paciente</strong></td><td>Credenciais enviadas apos realizacao de exames</td></tr>
+            <tr><td>9</td><td><strong>Odontologia</strong></td><td>Sistema ControleOdonto separado</td></tr>
+            <tr><td>10</td><td><strong>Planos fidelidade</strong></td><td>Associados tem descontos diferenciados</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>&#128683; Tom de Voz</h3>
+      <div class="grid-2">
+        <div>
+          <h4 style="color:var(--success);margin-bottom:8px">&#10003; FAZER</h4>
+          <ul style="font-size:0.85rem;padding-left:20px">
+            <li>Cordial, acolhedor e profissional</li>
+            <li>Emojis moderados (no final)</li>
+            <li>Tratamento por "voce"</li>
+            <li>Oferecer ajuda ao final</li>
+          </ul>
+        </div>
+        <div>
+          <h4 style="color:var(--danger);margin-bottom:8px">&#10007; NAO FAZER</h4>
+          <ul style="font-size:0.85rem;padding-left:20px">
+            <li>Nao prometer prazos de laudo especificos</li>
+            <li>Nao garantir conteudo do laudo</li>
+            <li>Nao confirmar sem verificar agenda</li>
+            <li>Nao vazar dados de outros pacientes</li>
+            <li>Nao agendar sem dados cadastrais completos</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= IA VS HUMANO ======================= -->
+  <div class="section" id="sec-ia-vs-humano" data-searchable>
+    <div class="card">
+      <h3>&#129302; Cobertura da IA</h3>
+      <div class="donut-wrap">
+        <div class="donut-chart">
+          <svg width="180" height="180" viewBox="0 0 180 180">
+            <circle cx="90" cy="90" r="70" fill="none" stroke="#e0e0e0" stroke-width="20"/>
+            <circle cx="90" cy="90" r="70" fill="none" stroke="#198038" stroke-width="20" stroke-dasharray="330 440" stroke-linecap="round"/>
+            <circle cx="90" cy="90" r="70" fill="none" stroke="#0f62fe" stroke-width="20" stroke-dasharray="88 440" stroke-dashoffset="-330" stroke-linecap="round"/>
+            <circle cx="90" cy="90" r="70" fill="none" stroke="#da1e28" stroke-width="20" stroke-dasharray="22 440" stroke-dashoffset="-418" stroke-linecap="round"/>
+          </svg>
+          <div class="donut-center">
+            <div class="pct">75%</div>
+            <div class="lbl">IA sozinha</div>
+          </div>
+        </div>
+        <ul class="donut-legend">
+          <li><span class="dot" style="background:#198038"></span><strong>~75%</strong> IA resolve sozinha (knowledge base)</li>
+          <li><span class="dot" style="background:#0f62fe"></span><strong>~20%</strong> IA + API Klingo (agendamento)</li>
+          <li><span class="dot" style="background:#da1e28"></span><strong>~5%</strong> Escalar para humano</li>
+        </ul>
+      </div>
+    </div>
+    <div class="grid-3" style="margin-top:16px">
+      <div class="card" style="border-top:4px solid var(--success)">
+        <h3 style="color:var(--success)">&#10003; IA Sozinha</h3>
+        <ul style="font-size:0.85rem;list-style:none">
+          <li style="padding:4px 0">&#9679; Saudacao e boas-vindas</li>
+          <li style="padding:4px 0">&#9679; Valores de consultas/exames</li>
+          <li style="padding:4px 0">&#9679; Convenios (resposta padrao)</li>
+          <li style="padding:4px 0">&#9679; Endereco e localizacao</li>
+          <li style="padding:4px 0">&#9679; Horario de funcionamento</li>
+          <li style="padding:4px 0">&#9679; Formas de pagamento</li>
+          <li style="padding:4px 0">&#9679; Planos Teleprime</li>
+          <li style="padding:4px 0">&#9679; Prazos de resultados</li>
+          <li style="padding:4px 0">&#9679; Portal do Paciente</li>
+          <li style="padding:4px 0">&#9679; Preparo para exames</li>
+          <li style="padding:4px 0">&#9679; Coleta de dados cadastrais</li>
+          <li style="padding:4px 0">&#9679; FAQ geral</li>
+          <li style="padding:4px 0">&#9679; Pacotes promocionais</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:4px solid var(--primary)">
+        <h3 style="color:var(--primary)">&#9881; IA + API Klingo</h3>
+        <ul style="font-size:0.85rem;list-style:none">
+          <li style="padding:4px 0">&#9679; Verificar disponibilidade de agenda</li>
+          <li style="padding:4px 0">&#9679; Agendar consulta/exame</li>
+          <li style="padding:4px 0">&#9679; Remarcar consulta</li>
+          <li style="padding:4px 0">&#9679; Cancelar consulta</li>
+          <li style="padding:4px 0">&#9679; Confirmar consulta</li>
+          <li style="padding:4px 0">&#9679; Buscar dados do paciente</li>
+          <li style="padding:4px 0">&#9679; Cadastrar paciente</li>
+          <li style="padding:4px 0">&#9679; Verificar status de laudo</li>
+          <li style="padding:4px 0">&#9679; Enviar credenciais portal</li>
+        </ul>
+      </div>
+      <div class="card" style="border-top:4px solid var(--danger)">
+        <h3 style="color:var(--danger)">&#128680; Escalar Humano</h3>
+        <ul style="font-size:0.85rem;list-style:none">
+          <li style="padding:4px 0">&#9679; Reclamacao grave</li>
+          <li style="padding:4px 0">&#9679; Duvida clinica especifica</li>
+          <li style="padding:4px 0">&#9679; Negociacao de valores</li>
+          <li style="padding:4px 0">&#9679; Protocolo de contraste</li>
+          <li style="padding:4px 0">&#9679; Financeiro complexo</li>
+          <li style="padding:4px 0">&#9679; Odontologia</li>
+          <li style="padding:4px 0">&#9679; Problemas tecnicos</li>
+          <li style="padding:4px 0">&#9679; Encaixe fora da agenda</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= ARVORE ======================= -->
+  <div class="section" id="sec-arvore" data-searchable>
+    <div class="card">
+      <h3>&#127795; Arvore de Decisao do Atendimento</h3>
+      <p style="font-size:0.85rem;color:var(--gray-600);margin-bottom:16px">Clique nos nos para expandir/recolher</p>
+      <div class="tree-node root expanded" onclick="this.classList.toggle('expanded')">&#128172; Paciente envia mensagem</div>
+      <div class="tree-children" style="display:block">
+        <div class="tree-node expanded" onclick="this.classList.toggle('expanded')" style="border-left-color:var(--success)">&#128308; INFORMACAO (valor, endereco, horario, convenio, plano)</div>
+        <div class="tree-children" style="display:block">
+          <div class="tree-node" style="border-left-color:var(--success);background:var(--success-light)">&#10003; Responder direto da knowledge base &rarr; FIM</div>
+        </div>
+        <div class="tree-node expanded" onclick="this.classList.toggle('expanded')" style="border-left-color:var(--primary)">&#128197; AGENDAMENTO</div>
+        <div class="tree-children" style="display:block">
+          <div class="tree-node expanded" onclick="this.classList.toggle('expanded')">Ja tem cadastro? &rarr; Buscar API Klingo</div>
+          <div class="tree-children" style="display:block">
+            <div class="tree-node" style="background:var(--primary-light)">SIM &rarr; Verificar agenda &rarr; Oferecer horarios &rarr; Confirmar</div>
+            <div class="tree-node" style="background:var(--warning-light)">NAO &rarr; Coletar dados &rarr; Cadastrar &rarr; Verificar agenda &rarr; Confirmar</div>
+          </div>
+        </div>
+        <div class="tree-node expanded" onclick="this.classList.toggle('expanded')" style="border-left-color:var(--purple)">&#128260; REMARCAR / CANCELAR</div>
+        <div class="tree-children" style="display:block">
+          <div class="tree-node">Buscar agendamento atual &rarr; Oferecer novas datas / Confirmar cancelamento</div>
+        </div>
+        <div class="tree-node expanded" onclick="this.classList.toggle('expanded')" style="border-left-color:var(--teal)">&#128203; RESULTADO DE EXAME</div>
+        <div class="tree-children" style="display:block">
+          <div class="tree-node">Informar prazos &rarr; Verificar status API &rarr; Enviar credenciais portal</div>
+        </div>
+        <div class="tree-node expanded" onclick="this.classList.toggle('expanded')" style="border-left-color:#f1c21b">&#128241; TELEPRIME / PLANOS</div>
+        <div class="tree-children" style="display:block">
+          <div class="tree-node">Explicar planos &rarr; Direcionar site &rarr; Coletar dados ativacao</div>
+        </div>
+        <div class="tree-node" style="border-left-color:var(--danger);background:var(--danger-light)">&#128680; NAO IDENTIFICADO / COMPLEXO &rarr; Escalar para humano com contexto</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= EXEMPLOS ======================= -->
+  <div class="section" id="sec-exemplos" data-searchable>
+    <div class="card">
+      <h3>&#128172; Exemplo 1: Consulta de valor + agendamento</h3>
+      <div class="chat-box">
+        <div class="chat-msg user"><div class="chat-label">Paciente</div>Boa tarde, qual o valor de uma consulta com o urologista?</div><div class="chat-clear"></div>
+        <div class="chat-msg bot"><div class="chat-label">IA</div>Ola! Voce entrou em contato com a IRB Prime Care. A consulta com urologista esta por R$149,90, com retorno no periodo de 30 dias. Gostaria de agendar?</div><div class="chat-clear"></div>
+        <div class="chat-msg user"><div class="chat-label">Paciente</div>Sim, quero agendar</div><div class="chat-clear"></div>
+        <div class="chat-msg bot"><div class="chat-label">IA</div>Para realizarmos o agendamento, poderia me informar:<br>- Nome completo:<br>- Data de nascimento:<br>- CPF:<br>- Telefone:<br>- E-mail:</div><div class="chat-clear"></div>
+        <div class="chat-msg user"><div class="chat-label">Paciente</div>Valter de Jesus Santos, 15/03/1980, 123.456.789-00, (11) 99999-0000, valter@email.com</div><div class="chat-clear"></div>
+        <div class="chat-msg bot"><div class="chat-label">IA</div>Temos disponibilidade dia 19/02 as 17:00 e 17:30 com o Dr. Pedro Cardoso. Qual o melhor horario?</div><div class="chat-clear"></div>
+        <div class="chat-msg user"><div class="chat-label">Paciente</div>17:30</div><div class="chat-clear"></div>
+        <div class="chat-msg bot"><div class="chat-label">IA</div>Prezado(a) VALTER DE JESUS SANTOS<br>Confirmacao de marcacao:<br>> CONSULTA UROLOGIA<br>> Dr(a) DR PEDRO CARDOSO<br>> 19/02/2026 as 17:30<br>> IRB PRIME CARE<br><br>Podemos confirmar?</div><div class="chat-clear"></div>
+        <div class="chat-msg user"><div class="chat-label">Paciente</div>Confirmo</div><div class="chat-clear"></div>
+        <div class="chat-msg bot"><div class="chat-label">IA</div>Perfeito! Aceitamos PIX, cartao de credito e boleto. Pode pagar na hora. Nosso endereco: Rua Boa Vista, 99 - 6o Andar, SP. Ficamos a disposicao!</div><div class="chat-clear"></div>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:16px">
+      <div class="card">
+        <h3>&#128172; Exemplo 2: Convenio</h3>
+        <div class="chat-box" style="max-height:200px">
+          <div class="chat-msg user"><div class="chat-label">Paciente</div>Ola, aceita convenio? Tenho Amil</div><div class="chat-clear"></div>
+          <div class="chat-msg bot"><div class="chat-label">IA</div>Informamos que nao aceitamos convenios, porem o atendimento pode ser realizado de forma particular com possibilidade de reembolso pelo seu plano. A consulta com especialista esta por R$149,90. Gostaria de agendar?</div><div class="chat-clear"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>&#128172; Exemplo 3: Teleprime</h3>
+        <div class="chat-box" style="max-height:200px">
+          <div class="chat-msg user"><div class="chat-label">Paciente</div>Como funciona esse plano de telemedicina?</div><div class="chat-clear"></div>
+          <div class="chat-msg bot"><div class="chat-label">IA</div>O Teleprime e nosso pronto atendimento digital 24h. Temos duas opcoes:<br>1. Mensal: R$14,90/mes - cancela quando quiser<br>2. Anual: R$9,90/mes<br>Compre em irbprimecare.com.br, em 4 dias recebe login. Baixe o app "IRB Prime Care". Uso ilimitado!</div><div class="chat-clear"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>&#128172; Exemplo 4: Resultado</h3>
+        <div class="chat-box" style="max-height:200px">
+          <div class="chat-msg user"><div class="chat-label">Paciente</div>Quando sai o resultado do exame que fiz?</div><div class="chat-clear"></div>
+          <div class="chat-msg bot"><div class="chat-label">IA</div>Prazos:<br>- Imagens: na hora<br>- Laudo/ECG: 24h<br>- Laboratoriais: ate 7 dias uteis<br><br>Acesse: portal-irb.klingo.app</div><div class="chat-clear"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>&#128172; Exemplo 5: Endereco</h3>
+        <div class="chat-box" style="max-height:200px">
+          <div class="chat-msg user"><div class="chat-label">Paciente</div>Onde fica voces?</div><div class="chat-clear"></div>
+          <div class="chat-msg bot"><div class="chat-label">IA</div>Rua Boa Vista, 99 - 6o Andar (ou Rua Quinze de Novembro, 212 - 6o Andar), SP. Proximo ao Metro Sao Bento. Os dois enderecos sao entradas do mesmo predio. Horario: seg-sex 07h-19h.</div><div class="chat-clear"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= INTENTS ======================= -->
+  <div class="section" id="sec-intents" data-searchable>
+    <div class="card">
+      <h3>&#129504; Intents para Classificacao NLU</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Intent</th><th>Exemplos do Paciente</th><th>Tipo</th></tr></thead>
+          <tbody>
+            <tr><td><code>agendar_consulta</code></td><td>"Quero agendar uma consulta", "Tem horario disponivel?"</td><td><span class="badge badge-blue">Acao</span></td></tr>
+            <tr><td><code>perguntar_valor</code></td><td>"Qual o valor?", "Quanto custa a consulta?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_convenio</code></td><td>"Aceita convenio?", "Tenho Amil, aceita?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_especialidade</code></td><td>"Tem cardiologista?", "Qual especialidade?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_endereco</code></td><td>"Onde fica?", "Qual o endereco?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_horario</code></td><td>"Qual horario de funcionamento?", "Abre sabado?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>resultado_exame</code></td><td>"Quando sai o resultado?", "Meu exame ficou pronto?"</td><td><span class="badge badge-purple">API</span></td></tr>
+            <tr><td><code>remarcar</code></td><td>"Quero remarcar", "Posso mudar o horario?"</td><td><span class="badge badge-blue">Acao</span></td></tr>
+            <tr><td><code>cancelar</code></td><td>"Quero cancelar a consulta"</td><td><span class="badge badge-blue">Acao</span></td></tr>
+            <tr><td><code>confirmar</code></td><td>"Confirmo", "Pode confirmar"</td><td><span class="badge badge-blue">Acao</span></td></tr>
+            <tr><td><code>perguntar_exame</code></td><td>"Fazem tomografia?", "Tem ECG?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_pagamento</code></td><td>"Aceita PIX?", "Parcela no cartao?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_plano</code></td><td>"Como funciona o Teleprime?", "Quais os planos?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>perguntar_preparo</code></td><td>"Precisa de jejum?", "Precisa de pedido medico?"</td><td><span class="badge badge-green">Info</span></td></tr>
+            <tr><td><code>saudacao</code></td><td>"Boa tarde", "Ola", "Bom dia"</td><td><span class="badge badge-teal">Social</span></td></tr>
+            <tr><td><code>agradecimento</code></td><td>"Obrigado", "Valeu"</td><td><span class="badge badge-teal">Social</span></td></tr>
+            <tr><td><code>reclamacao</code></td><td>"Meu laudo nao saiu", "Estou esperando ha muito tempo"</td><td><span class="badge badge-red">Escalar</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('sec-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// FAQ
+document.querySelectorAll('.faq-item').forEach(item => {
+  item.querySelector('.faq-q').addEventListener('click', () => {
+    item.classList.toggle('open');
+  });
+});
+
+// Search
+const searchInput = document.getElementById('searchInput');
+const searchCount = document.getElementById('searchCount');
+searchInput.addEventListener('input', function() {
+  const q = this.value.toLowerCase().trim();
+  if (!q) {
+    searchCount.textContent = '';
+    document.querySelectorAll('.section').forEach(s => s.style.display = '');
+    document.querySelectorAll('.section.active').forEach(s => s.style.display = 'block');
+    // remove highlights
+    document.querySelectorAll('.highlight').forEach(el => {
+      el.outerHTML = el.textContent;
+    });
+    return;
+  }
+  let count = 0;
+  document.querySelectorAll('.section').forEach(s => {
+    const text = s.textContent.toLowerCase();
+    if (text.includes(q)) {
+      s.style.display = 'block';
+      count++;
+    } else {
+      s.style.display = 'none';
+    }
+  });
+  searchCount.textContent = count + ' secoes encontradas';
+});
+
+// Copy
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copiado!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copiar';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+// Tree toggle
+document.querySelectorAll('.tree-node').forEach(node => {
+  node.addEventListener('click', function(e) {
+    e.stopPropagation();
+    this.classList.toggle('expanded');
+    const children = this.nextElementSibling;
+    if (children && children.classList.contains('tree-children')) {
+      children.style.display = this.classList.contains('expanded') ? 'block' : 'none';
+    }
+  });
+});
+</script>
+</body>
+</html>

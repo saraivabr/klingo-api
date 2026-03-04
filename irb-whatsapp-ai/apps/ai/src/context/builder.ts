@@ -3,6 +3,12 @@ import OpenAI from 'openai';
 
 const MAX_MESSAGES = 20;
 
+interface DoctorInfo {
+  name: string;
+  specialty: string | null;
+  crm: string | null;
+}
+
 interface ConversationDoc {
   messages: Array<{ sender: string; text: string }>;
   [key: string]: unknown;
@@ -18,9 +24,21 @@ export function buildContext(params: {
   knowledgeBase: Record<string, string>;
   patientInfo?: { name?: string; birthDate?: string } | null;
   ragContext?: string;
+  doctors?: DoctorInfo[];
 }): ConversationContext {
-  const { conversation, knowledgeBase, ragContext } = params;
+  const { conversation, knowledgeBase, ragContext, doctors } = params;
   let systemPrompt = buildSystemPrompt(knowledgeBase, ragContext);
+
+  // Inject active doctors into context
+  if (doctors && doctors.length > 0) {
+    const doctorLines = doctors.map(d => {
+      const parts = [d.name];
+      if (d.specialty) parts.push(d.specialty);
+      if (d.crm) parts.push(`CRM ${d.crm}`);
+      return parts.join(' - ');
+    }).join('\n');
+    systemPrompt += `\n\nMEDICOS ATIVOS DA IRB (use para recomendar por nome):\n${doctorLines}\n\nQuando o paciente perguntar sobre medicos ou especialidades, recomende pelo nome com entusiasmo pessoal. Ex: "O Dr. Fulano e incrivel, referencia na area!"`;
+  }
 
   // Adicionar hints contextuais baseado no estado da conversa
   const conversationText = conversation.messages.map((m) => m.text.toLowerCase()).join(' ');
