@@ -9,6 +9,19 @@ import { api } from '../services/api';
 
 interface WorkflowStats {
   date: string;
+  appointments: {
+    byStatus: Record<string, number>;
+    total: number;
+    recent: Array<{
+      id: string;
+      patientName: string | null;
+      patientPhone: string;
+      doctorName: string | null;
+      doctorSpecialty: string | null;
+      status: string;
+      scheduledAt: string;
+    }>;
+  };
   opd: {
     byStatus: Record<string, number>;
     total: number;
@@ -151,7 +164,7 @@ function ActivityItem({
   timestamp,
   status,
 }: {
-  type: 'opd' | 'lab' | 'billing' | 'pharmacy';
+  type: 'opd' | 'lab' | 'billing' | 'pharmacy' | 'appointment';
   icon: React.ReactNode;
   title: string;
   description?: string;
@@ -163,6 +176,7 @@ function ActivityItem({
     lab: 'bg-purple-50 text-purple-600',
     billing: 'bg-green-50 text-green-600',
     pharmacy: 'bg-pink-50 text-pink-600',
+    appointment: 'bg-violet-50 text-violet-600',
   };
 
   return (
@@ -265,12 +279,19 @@ export default function WorkflowDashboard() {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
         <StatCard
           icon={<Activity size={24} className="text-blue-600" />}
           label="Processos Ativos"
           value={totalActive}
           color="bg-blue-50"
+        />
+        <StatCard
+          icon={<Clock size={24} className="text-violet-600" />}
+          label="Agendamentos"
+          value={stats.appointments.total}
+          subtext={`${stats.appointments.byStatus['confirmed'] || 0} confirmados`}
+          color="bg-violet-50"
         />
         <StatCard
           icon={<Users size={24} className="text-cyan-600" />}
@@ -303,7 +324,56 @@ export default function WorkflowDashboard() {
       </div>
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        {/* Appointments Section */}
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-2xl border border-slate-100 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900">Agendamentos</h3>
+              <Clock size={20} className="text-violet-600" />
+            </div>
+
+            {/* Status breakdown */}
+            <div className="space-y-3 mb-6">
+              {[
+                { key: 'scheduled', label: 'Agendados', icon: Clock },
+                { key: 'confirmed', label: 'Confirmados', icon: CheckCircle },
+                { key: 'completed', label: 'Concluído', icon: CheckCircle },
+                { key: 'cancelled', label: 'Cancelado', icon: AlertCircle },
+              ].map(({ key, label, icon: Icon }) => (
+                <div key={key} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Icon size={16} className={`${getStatusColor(key).text}`} />
+                    <span className="text-sm text-slate-600">{label}</span>
+                  </div>
+                  <span className="font-bold text-slate-900">{stats.appointments.byStatus[key] || 0}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <h4 className="text-xs font-semibold text-slate-600 uppercase mb-3">Próximos</h4>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {stats.appointments.recent.length > 0 ? (
+                  stats.appointments.recent.slice(0, 5).map(apt => (
+                    <ActivityItem
+                      key={apt.id}
+                      type="appointment"
+                      icon={<Clock size={16} />}
+                      title={apt.patientName || 'Paciente'}
+                      description={`Dr. ${apt.doctorName || 'N/A'} - ${apt.doctorSpecialty || ''}`}
+                      timestamp={apt.scheduledAt}
+                      status={apt.status}
+                    />
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-500 text-center py-4">Nenhum agendamento</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* OPD Section */}
         <div className="lg:col-span-1">
           <div className="bg-white rounded-2xl border border-slate-100 p-6">

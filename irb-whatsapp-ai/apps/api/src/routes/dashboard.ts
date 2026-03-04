@@ -190,8 +190,62 @@ export async function dashboardRoutes(app: FastifyInstance) {
       )
       .limit(10);
 
+    // Appointments stats - Today's confirmed/scheduled appointments
+    const appointmentStats = await db.select({
+      status: schema.appointments.status,
+      count: count(),
+    })
+      .from(schema.appointments)
+      .where(
+        and(
+          gte(schema.appointments.scheduledAt, today),
+          lte(schema.appointments.scheduledAt, new Date(today.getTime() + 24 * 60 * 60 * 1000))
+        )
+      )
+      .groupBy(schema.appointments.status);
+
+    const appointmentsByStatus = {
+      scheduled: 0,
+      confirmed: 0,
+      checked_in: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+    appointmentStats.forEach(s => {
+      if (s.status && appointmentsByStatus.hasOwnProperty(s.status)) {
+        appointmentsByStatus[s.status as keyof typeof appointmentsByStatus] = Number(s.count);
+      }
+    });
+
+    // Recent appointments
+    const recentAppointments = await db.select({
+      id: schema.appointments.id,
+      patientName: schema.patients.name,
+      patientPhone: schema.patients.phone,
+      doctorName: schema.doctors.name,
+      doctorSpecialty: schema.doctors.specialty,
+      status: schema.appointments.status,
+      scheduledAt: schema.appointments.scheduledAt,
+    })
+      .from(schema.appointments)
+      .leftJoin(schema.patients, eq(schema.appointments.patientId, schema.patients.id))
+      .leftJoin(schema.doctors, eq(schema.appointments.doctorId, schema.doctors.id))
+      .where(
+        and(
+          gte(schema.appointments.scheduledAt, today),
+          lte(schema.appointments.scheduledAt, new Date(today.getTime() + 24 * 60 * 60 * 1000))
+        )
+      )
+      .orderBy(desc(schema.appointments.scheduledAt))
+      .limit(10);
+
     return {
       date: todayStr,
+      appointments: {
+        byStatus: appointmentsByStatus,
+        total: Object.values(appointmentsByStatus).reduce((a, b) => a + b, 0),
+        recent: recentAppointments,
+      },
       opd: {
         byStatus: opdByStatus,
         total: Object.values(opdByStatus).reduce((a, b) => a + b, 0),

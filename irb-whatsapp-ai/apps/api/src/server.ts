@@ -24,6 +24,7 @@ import { labRoutes } from './routes/lab.js';
 import { opdRoutes } from './routes/opd.js';
 import { pharmacyRoutes } from './routes/pharmacy.js';
 import { doctorRoutes } from './routes/doctors.js';
+import { syncRoutes } from './routes/sync.js';
 import { websocketHandler } from './websocket/handler.js';
 
 const PORT = parseInt(process.env.API_PORT || '3001');
@@ -66,7 +67,8 @@ async function start() {
       await app.register(labRoutes, { prefix: '/api/lab' });
 await app.register(opdRoutes, { prefix: '/api/opd' });
        await app.register(pharmacyRoutes, { prefix: '/api/pharmacy' });
-       await app.register(doctorRoutes, { prefix: '/api/doctors' });
+        await app.register(doctorRoutes, { prefix: '/api/doctors' });
+        await app.register(syncRoutes, { prefix: '/api/sync' });
 
    // WebSocket
   await app.register(websocketHandler, { prefix: '/ws' });

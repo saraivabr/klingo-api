@@ -16,6 +16,7 @@ import { processPaymentNotification } from './processors/payment-notification.js
 import { processPaymentReminder } from './processors/payment-reminder.js';
 import { processTeleconsultationReminder } from './processors/teleconsultation-reminder.js';
 import { processTeleconsultationCleanup } from './processors/teleconsultation-cleanup.js';
+import { processKlingoAgendaSync } from './processors/klingo-agenda-sync.js';
 
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -84,6 +85,10 @@ async function start() {
       connection: redisConnection,
       concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.TELECONSULTATION_CLEANUP],
     }),
+    new Worker(QUEUE_NAMES.KLINGO_AGENDA_SYNC, processKlingoAgendaSync, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.KLINGO_AGENDA_SYNC],
+    }),
   ];
 
   // Schedule repeatable booking cleanup job (every hour)
@@ -122,6 +127,21 @@ async function start() {
   const paymentReminderQueue = new Queue(QUEUE_NAMES.PAYMENT_REMINDER, { connection: redisConnection });
   await paymentReminderQueue.add('daily-payment-reminder', {}, {
     repeat: { pattern: '0 13 * * *' }, // 13:00 UTC = 10:00 BRT
+    removeOnComplete: 10,
+    removeOnFail: 50,
+  });
+
+  // Schedule Klingo sync - Light sync every 5 minutes (appointments only)
+  const klingoAgendaSyncQueue = new Queue(QUEUE_NAMES.KLINGO_AGENDA_SYNC, { connection: redisConnection });
+  await klingoAgendaSyncQueue.add('light-sync', { type: 'light' }, {
+    repeat: { every: 5 * 60 * 1000 }, // 5 minutes
+    removeOnComplete: 10,
+    removeOnFail: 50,
+  });
+
+  // Schedule Klingo sync - Full sync every hour (doctors + appointments + vouchers)
+  await klingoAgendaSyncQueue.add('full-sync', { type: 'full' }, {
+    repeat: { every: 60 * 60 * 1000 }, // 60 minutes
     removeOnComplete: 10,
     removeOnFail: 50,
   });
