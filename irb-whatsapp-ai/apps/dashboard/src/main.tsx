@@ -17,6 +17,10 @@ import LabTests from './pages/LabTests';
 import Pharmacy from './pages/Pharmacy';
 import WorkflowDashboard from './pages/WorkflowDashboard';
 import AppLayout from './components/layout/AppLayout';
+import AccountsPayable from './pages/AccountsPayable';
+import AccountsReceivable from './pages/AccountsReceivable';
+import CashFlow from './pages/CashFlow';
+import Users from './pages/Users';
 
 function App() {
   const token = localStorage.getItem('token');
@@ -43,7 +47,11 @@ function App() {
          <Route path="/metrics" element={<Metrics />} />
          <Route path="/subscriptions" element={<Subscriptions />} />
          <Route path="/finance" element={<Finance />} />
+         <Route path="/finance/payable" element={<AccountsPayable />} />
+         <Route path="/finance/receivable" element={<AccountsReceivable />} />
+         <Route path="/finance/cashflow" element={<CashFlow />} />
          <Route path="/teleconsulta" element={<Teleconsultation />} />
+         <Route path="/users" element={<Users />} />
          <Route path="/settings" element={<Settings />} />
        </Route>
        <Route path="/conversations/:id" element={<Chat />} />

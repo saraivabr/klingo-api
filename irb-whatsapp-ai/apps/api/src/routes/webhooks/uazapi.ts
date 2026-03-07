@@ -110,28 +110,36 @@ function mapMessageType(uazapiType: string | undefined): 'text' | 'image' | 'aud
 
 export async function uazapiWebhookRoutes(app: FastifyInstance) {
   app.post('/uazapi', async (request, reply) => {
-    // Webhook authentication - REQUIRED for security
+    const body = request.body as UazapiWebhookBody;
+    
+    // Webhook authentication - multiple methods supported
     const WEBHOOK_TOKEN = process.env.UAZAPI_WEBHOOK_TOKEN;
+    const UAZAPI_INSTANCE_TOKEN = process.env.UAZAPI_TOKEN;
     
-    if (!WEBHOOK_TOKEN) {
-      app.log.error('[uazapi-webhook] UAZAPI_WEBHOOK_TOKEN not configured - rejecting request');
-      return reply.code(500).send({ 
-        error: 'Server misconfigured', 
-        message: 'Webhook authentication not configured' 
-      });
-    }
+    // Method 1: Header x-webhook-token
+    const headerToken = request.headers['x-webhook-token'];
+    // Method 2: Query string ?token=xxx
+    const queryToken = (request.query as Record<string, string>)?.token;
+    // Method 3: Instance token in body (UAZAPI sends this)
+    const bodyToken = body.token;
     
-    const providedToken = request.headers['x-webhook-token'];
+    const isAuthorized = 
+      (WEBHOOK_TOKEN && (headerToken === WEBHOOK_TOKEN || queryToken === WEBHOOK_TOKEN)) ||
+      (UAZAPI_INSTANCE_TOKEN && bodyToken === UAZAPI_INSTANCE_TOKEN) ||
+      // Fallback: accept if no token is configured (dev mode)
+      (!WEBHOOK_TOKEN && !UAZAPI_INSTANCE_TOKEN);
     
-    if (providedToken !== WEBHOOK_TOKEN) {
+    if (!isAuthorized) {
       app.log.warn({
         ip: request.ip,
-        providedToken: providedToken ? '***' : undefined,
+        hasHeaderToken: !!headerToken,
+        hasQueryToken: !!queryToken,
+        hasBodyToken: !!bodyToken,
       }, '[uazapi-webhook] Unauthorized webhook request');
       return reply.code(401).send({ error: 'Unauthorized' });
     }
     
-    const body = request.body as UazapiWebhookBody;
+    app.log.info({ eventType: body.EventType, chatId: body.message?.chatid || body.chatid }, '[uazapi-webhook] Received');
 
     // Extract message from nested structure or flat structure
     const msg = body.message;

@@ -812,6 +812,18 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   const conversation = await ConversationModel.findById(conversationId);
   if (!conversation || !conversation.isAiHandling) return { status: 'skipped' };
 
+  // 1.5 🔥 CANCELAR recuperador de atenção pendente — paciente respondeu!
+  try {
+    const recoveryJobId = `attention_recovery_${conversationId}`;
+    const pendingJob = await followUpQueue.getJob(recoveryJobId);
+    if (pendingJob) {
+      await pendingJob.remove();
+      console.log(`[AI-PIPELINE] 🔥 Cancelled attention recovery for ${patientPhone} — patient responded`);
+    }
+  } catch (err) {
+    // Ignora erro se job não existir
+  }
+
   // 2. Classify intent from patient message
   const { primary: intent, all: allIntents } = classifyIntent(text);
 
@@ -914,7 +926,9 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
 
   // Auto-detect bullet points / numbered lists and convert to interactive buttons
   // This catches cases where the AI writes options as text instead of calling the tool
-  if (!interactiveHolder.message) {
+  // BUT: Don't do this if send_interactive_message was already called!
+  const alreadySentInteractive = toolsUsed.includes('send_interactive_message');
+  if (!interactiveHolder.message && !alreadySentInteractive) {
     const bulletRegex = /^[\s]*(?:[•\-\*]|\d+[\.\)])\s*(.+)$/gm;
     const bullets: string[] = [];
     let match;
@@ -1107,11 +1121,41 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     
     // Detect if AI promised buttons but didn't call the tool
     const promisedButtons = /vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista)/i.test(aiText);
-    if (promisedButtons) {
-      console.warn('[AI-PIPELINE] ⚠️ AI PROMISED BUTTONS BUT DID NOT CALL TOOL!');
-      console.warn('[AI-PIPELINE] Response text:', aiText);
-      console.warn('[AI-PIPELINE] Tools used:', toolsUsed);
-      // This is logged for monitoring - indicates prompt needs improvement
+    
+    // Also detect first contact / greeting scenarios that should always have buttons
+    const isFirstContact = conversation.messages.filter(m => m.sender === 'patient').length <= 1;
+    const isGreeting = /^(oi|olá|ola|bom dia|boa tarde|boa noite|e ai|eai|hey|hello|hi)\b/i.test(text);
+    const shouldHaveButtons = promisedButtons || (isFirstContact && isGreeting);
+    
+    if (shouldHaveButtons) {
+      console.warn('[AI-PIPELINE] ⚠️ AI SHOULD HAVE SENT BUTTONS BUT DIDNT - Adding fallback buttons...');
+      console.warn('[AI-PIPELINE] isFirstContact:', isFirstContact, 'isGreeting:', isGreeting, 'promisedButtons:', promisedButtons);
+      
+      // Add fallback buttons based on context
+      // Since the AI didn't call the tool, we'll add sensible defaults
+      if (isFirstContact || isGreeting) {
+        // First contact: triage buttons
+        interactiveHolder.message = {
+          type: 'buttons',
+          text: aiText.replace(/vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim() || aiText,
+          buttons: [
+            { id: 'sintoma', text: 'Tenho um sintoma' },
+            { id: 'checkup', text: 'Quero check-up' },
+            { id: 'conhecer', text: 'Conhecer a clínica' },
+          ],
+          footerText: 'IRB Prime Care',
+        };
+        sendJobData.interactive = interactiveHolder.message;
+        // Clean up the text - remove the promise since we're delivering buttons
+        aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim();
+        sendJobData.text = aiText;
+        console.log('[AI-PIPELINE] ✅ Added fallback triage buttons');
+      } else if (promisedButtons) {
+        // Generic case: remove the broken promise from text
+        aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim();
+        sendJobData.text = aiText;
+        console.log('[AI-PIPELINE] Removed unfulfilled button promise from text');
+      }
     }
   }
 
@@ -1125,7 +1169,32 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     removeOnFail: 500,
   });
 
-  // 13. Enqueue analytics
+  // 13. 🔥 RECUPERADOR DE ATENÇÃO — Agenda quando enviamos mensagem interativa
+  // Se enviamos botões, esperamos resposta. Se não vier, ativa o recuperador.
+  if (interactiveHolder.message && !escalationCheck.shouldEscalate) {
+    // Determina contexto para mensagens de recuperação
+    const recoveryContext = intent === 'appointment_booking' ? 'agendamento'
+      : intent === 'price_inquiry' ? 'precos'
+      : intent === 'service_info' ? 'informacoes'
+      : 'conversa';
+
+    await followUpQueue.add('follow-up', {
+      conversationId,
+      patientPhone,
+      patientName,
+      type: 'attention_recovery',
+      attempt: 1,
+      lastContext: recoveryContext,
+    }, {
+      delay: 30 * 60 * 1000, // Primeira tentativa em 30 minutos
+      removeOnComplete: 50,
+      jobId: `attention_recovery_${conversationId}`, // ID único para poder cancelar
+    });
+
+    console.log(`[AI-PIPELINE] 🔥 Attention recovery scheduled for ${patientPhone} in 30min`);
+  }
+
+  // 14. Enqueue analytics
   await analyticsQueue.add('update', {
     conversationId,
     intent,

@@ -25,6 +25,10 @@ import { opdRoutes } from './routes/opd.js';
 import { pharmacyRoutes } from './routes/pharmacy.js';
 import { doctorRoutes } from './routes/doctors.js';
 import { syncRoutes } from './routes/sync.js';
+import { accountsPayableRoutes } from './routes/accounts-payable.js';
+import { accountsReceivableRoutes } from './routes/accounts-receivable.js';
+import { cashFlowRoutes } from './routes/cash-flow.js';
+import { userRoutes } from './routes/users.js';
 import { websocketHandler } from './websocket/handler.js';
 
 const PORT = parseInt(process.env.API_PORT || '3001');
@@ -69,6 +73,10 @@ await app.register(opdRoutes, { prefix: '/api/opd' });
        await app.register(pharmacyRoutes, { prefix: '/api/pharmacy' });
         await app.register(doctorRoutes, { prefix: '/api/doctors' });
         await app.register(syncRoutes, { prefix: '/api/sync' });
+  await app.register(accountsPayableRoutes, { prefix: '/api/accounts-payable' });
+  await app.register(accountsReceivableRoutes, { prefix: '/api/accounts-receivable' });
+  await app.register(cashFlowRoutes, { prefix: '/api/cash-flow' });
+  await app.register(userRoutes, { prefix: '/api/users' });
 
    // WebSocket
   await app.register(websocketHandler, { prefix: '/ws' });

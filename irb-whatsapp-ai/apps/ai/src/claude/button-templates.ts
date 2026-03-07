@@ -57,7 +57,7 @@ export const welcomeButtons: ButtonTemplate = {
 export const triageButtons: ButtonTemplate = {
   text: "Que bom que voce quer cuidar da saude! 😊 Me conta, o que ta te trazendo aqui hoje?",
   buttons: [
-    { id: "sintoma", text: "Estou com sintoma" },
+    { id: "sintoma", text: "Tenho um sintoma" },
     { id: "checkup", text: "Quero check-up" },
     { id: "exame", text: "Tenho pedido de exame" },
   ],

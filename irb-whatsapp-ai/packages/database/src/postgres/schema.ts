@@ -572,3 +572,406 @@ export const medicineSaleItems = pgTable('medicine_sale_items', {
    saleIdx: index('medicine_sale_items_sale_id_idx').on(table.saleId),
    medicineIdx: index('medicine_sale_items_medicine_id_idx').on(table.medicineId),
 }));
+
+// ============================================
+// === FINANCIAL MODULE - Accounts Payable ===
+// ============================================
+
+// Cost Centers (21 units: Projetos, Bragança, Paraguaçu, SAMU-MG, Nardini, Rondônia, etc.)
+export const costCenters = pgTable('cost_centers', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   code: varchar('code', { length: 20 }).unique().notNull(),
+   name: varchar('name', { length: 100 }).notNull(),
+   description: text('description'),
+   parentId: uuid('parent_id').references((): any => costCenters.id),
+   isActive: boolean('is_active').default(true),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   codeIdx: uniqueIndex('cost_centers_code_idx').on(table.code),
+   parentIdx: index('cost_centers_parent_id_idx').on(table.parentId),
+}));
+
+// Chart of Accounts (25 categories: Pessoal, Impostos, Operacional, etc.)
+export const chartOfAccounts = pgTable('chart_of_accounts', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   code: varchar('code', { length: 20 }).unique().notNull(),
+   name: varchar('name', { length: 100 }).notNull(),
+   type: varchar('type', { length: 20 }).notNull(), // expense, revenue, asset, liability
+   parentId: uuid('parent_id').references((): any => chartOfAccounts.id),
+   isActive: boolean('is_active').default(true),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   codeIdx: uniqueIndex('chart_of_accounts_code_idx').on(table.code),
+   typeIdx: index('chart_of_accounts_type_idx').on(table.type),
+}));
+
+// Suppliers (Fornecedores)
+export const suppliers = pgTable('suppliers', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   cnpj: varchar('cnpj', { length: 18 }).unique(),
+   cpf: varchar('cpf', { length: 14 }),
+   legalName: varchar('legal_name', { length: 255 }).notNull(), // Razão Social
+   tradeName: varchar('trade_name', { length: 255 }), // Nome Fantasia
+   email: varchar('email', { length: 255 }),
+   phone: varchar('phone', { length: 20 }),
+   address: text('address'),
+   city: varchar('city', { length: 100 }),
+   state: varchar('state', { length: 2 }),
+   zipCode: varchar('zip_code', { length: 10 }),
+   bankName: varchar('bank_name', { length: 100 }),
+   bankAgency: varchar('bank_agency', { length: 20 }),
+   bankAccount: varchar('bank_account', { length: 30 }),
+   bankAccountType: varchar('bank_account_type', { length: 20 }), // corrente, poupança
+   pixKey: varchar('pix_key', { length: 100 }),
+   klingoDoctorId: integer('klingo_doctor_id'), // Link to Klingo for medical professionals
+   notes: text('notes'),
+   isActive: boolean('is_active').default(true),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   cnpjIdx: uniqueIndex('suppliers_cnpj_idx').on(table.cnpj),
+   legalNameIdx: index('suppliers_legal_name_idx').on(table.legalName),
+   klingoDoctorIdx: index('suppliers_klingo_doctor_id_idx').on(table.klingoDoctorId),
+}));
+
+// Bank Accounts (7 accounts: Bradesco x3, Unicred, Safra, BB)
+export const bankAccounts = pgTable('bank_accounts', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   bankCode: varchar('bank_code', { length: 10 }).notNull(),
+   bankName: varchar('bank_name', { length: 100 }).notNull(),
+   agency: varchar('agency', { length: 20 }).notNull(),
+   accountNumber: varchar('account_number', { length: 30 }).notNull(),
+   accountType: varchar('account_type', { length: 20 }).notNull(), // corrente, poupança, aplicação
+   nickname: varchar('nickname', { length: 100 }), // Apelido para identificação
+   initialBalance: integer('initial_balance').default(0), // centavos
+   currentBalance: integer('current_balance').default(0), // centavos
+   overdraftLimit: integer('overdraft_limit').default(0), // cheque especial - centavos
+   isActive: boolean('is_active').default(true),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   bankAccountIdx: uniqueIndex('bank_accounts_bank_account_idx').on(table.bankCode, table.agency, table.accountNumber),
+}));
+
+// Accounts Payable (Contas a Pagar - 862+ entries)
+export const accountsPayable = pgTable('accounts_payable', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   documentNumber: varchar('document_number', { length: 50 }), // NF number
+   documentType: varchar('document_type', { length: 30 }), // NF, Boleto, Fatura, Recibo
+   supplierId: uuid('supplier_id').references(() => suppliers.id),
+   costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+   chartAccountId: uuid('chart_account_id').references(() => chartOfAccounts.id),
+   bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+   description: text('description').notNull(),
+   grossAmount: integer('gross_amount').notNull(), // Valor bruto em centavos
+   netAmount: integer('net_amount').notNull(), // Valor líquido em centavos
+   // Tax retentions (impostos retidos)
+   inssRetention: integer('inss_retention').default(0), // centavos
+   irpjRetention: integer('irpj_retention').default(0), // centavos
+   csllRetention: integer('csll_retention').default(0), // centavos
+   cofinsRetention: integer('cofins_retention').default(0), // centavos
+   pisRetention: integer('pis_retention').default(0), // centavos
+   issRetention: integer('iss_retention').default(0), // centavos
+   // Dates
+   issueDate: date('issue_date'), // Data de emissão
+   dueDate: date('due_date').notNull(), // Data de vencimento
+   paymentDate: date('payment_date'), // Data de pagamento efetivo
+   competenceDate: date('competence_date'), // Competência contábil
+   // Status and workflow
+   status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, approved, paid, cancelled, overdue
+   paymentMethod: varchar('payment_method', { length: 30 }), // pix, ted, boleto, cheque, dinheiro
+   approvedBy: uuid('approved_by').references(() => users.id),
+   approvedAt: timestamp('approved_at', { withTimezone: true }),
+   paidBy: uuid('paid_by').references(() => users.id),
+   notes: text('notes'),
+   attachmentUrl: text('attachment_url'), // URL do comprovante/NF
+   barcode: varchar('barcode', { length: 100 }), // Código de barras do boleto
+   pixCode: text('pix_code'), // Código PIX copia-e-cola
+   createdBy: uuid('created_by').references(() => users.id),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   supplierIdx: index('accounts_payable_supplier_id_idx').on(table.supplierId),
+   costCenterIdx: index('accounts_payable_cost_center_id_idx').on(table.costCenterId),
+   chartAccountIdx: index('accounts_payable_chart_account_id_idx').on(table.chartAccountId),
+   statusIdx: index('accounts_payable_status_idx').on(table.status),
+   dueDateIdx: index('accounts_payable_due_date_idx').on(table.dueDate),
+   paymentDateIdx: index('accounts_payable_payment_date_idx').on(table.paymentDate),
+}));
+
+// Payment Approvals (Aprovações de pagamento - workflow)
+export const paymentApprovals = pgTable('payment_approvals', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   accountPayableId: uuid('account_payable_id').references(() => accountsPayable.id).notNull(),
+   requestedBy: uuid('requested_by').references(() => users.id),
+   requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow(),
+   approvedBy: uuid('approved_by').references(() => users.id),
+   approvedAt: timestamp('approved_at', { withTimezone: true }),
+   status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, approved, rejected
+   rejectionReason: text('rejection_reason'),
+   notes: text('notes'),
+   notifiedViaWhatsapp: boolean('notified_via_whatsapp').default(false),
+   whatsappNotifiedAt: timestamp('whatsapp_notified_at', { withTimezone: true }),
+}, (table) => ({
+   accountPayableIdx: index('payment_approvals_account_payable_id_idx').on(table.accountPayableId),
+   statusIdx: index('payment_approvals_status_idx').on(table.status),
+}));
+
+// Credit Card Purchases (Compras no cartão corporativo)
+export const creditCardPurchases = pgTable('credit_card_purchases', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   cardLastDigits: varchar('card_last_digits', { length: 4 }),
+   cardHolder: varchar('card_holder', { length: 100 }),
+   merchantName: varchar('merchant_name', { length: 255 }).notNull(),
+   purchaseDate: date('purchase_date').notNull(),
+   totalAmount: integer('total_amount').notNull(), // centavos
+   installments: integer('installments').default(1),
+   installmentAmount: integer('installment_amount').notNull(), // centavos
+   currentInstallment: integer('current_installment').default(1),
+   costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+   chartAccountId: uuid('chart_account_id').references(() => chartOfAccounts.id),
+   description: text('description'),
+   status: varchar('status', { length: 20 }).default('active').notNull(), // active, paid, cancelled
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   purchaseDateIdx: index('credit_card_purchases_purchase_date_idx').on(table.purchaseDate),
+   statusIdx: index('credit_card_purchases_status_idx').on(table.status),
+   costCenterIdx: index('credit_card_purchases_cost_center_id_idx').on(table.costCenterId),
+}));
+
+// Bank Transactions (Movimentações bancárias para conciliação)
+export const bankTransactions = pgTable('bank_transactions', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id).notNull(),
+   transactionDate: date('transaction_date').notNull(),
+   type: varchar('type', { length: 20 }).notNull(), // credit, debit, transfer_in, transfer_out
+   amount: integer('amount').notNull(), // centavos (positivo)
+   balance: integer('balance'), // saldo após transação
+   description: text('description'),
+   accountPayableId: uuid('account_payable_id').references(() => accountsPayable.id),
+   accountReceivableId: uuid('account_receivable_id'), // será referenciado depois
+   reconciled: boolean('reconciled').default(false),
+   reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+   reconciledBy: uuid('reconciled_by').references(() => users.id),
+   externalRef: varchar('external_ref', { length: 100 }), // ID do extrato bancário
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   bankAccountIdx: index('bank_transactions_bank_account_id_idx').on(table.bankAccountId),
+   transactionDateIdx: index('bank_transactions_transaction_date_idx').on(table.transactionDate),
+   typeIdx: index('bank_transactions_type_idx').on(table.type),
+   reconciledIdx: index('bank_transactions_reconciled_idx').on(table.reconciled),
+}));
+
+// ============================================
+// === FINANCIAL MODULE - Accounts Receivable ===
+// ============================================
+
+// Insurance Providers (Convênios - 13 cadastrados)
+export const insuranceProviders = pgTable('insurance_providers', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   code: varchar('code', { length: 20 }).unique(),
+   name: varchar('name', { length: 100 }).notNull(),
+   cnpj: varchar('cnpj', { length: 18 }),
+   ansCode: varchar('ans_code', { length: 20 }), // Código ANS
+   contactName: varchar('contact_name', { length: 100 }),
+   contactEmail: varchar('contact_email', { length: 255 }),
+   contactPhone: varchar('contact_phone', { length: 20 }),
+   paymentTermDays: integer('payment_term_days').default(30), // Prazo de pagamento
+   notes: text('notes'),
+   isActive: boolean('is_active').default(true),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   codeIdx: uniqueIndex('insurance_providers_code_idx').on(table.code),
+   nameIdx: index('insurance_providers_name_idx').on(table.name),
+}));
+
+// Accounts Receivable (Contas a Receber)
+export const accountsReceivable = pgTable('accounts_receivable', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   patientId: uuid('patient_id').references(() => patients.id),
+   doctorId: uuid('doctor_id').references(() => doctors.id),
+   insuranceProviderId: uuid('insurance_provider_id').references(() => insuranceProviders.id),
+   costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+   // Service info
+   serviceType: varchar('service_type', { length: 20 }).notNull(), // medical, dental, exam, procedure
+   procedureCode: varchar('procedure_code', { length: 50 }), // TUSS code
+   procedureDescription: text('procedure_description'),
+   guideNumber: varchar('guide_number', { length: 50 }), // Número da guia
+   authorizationNumber: varchar('authorization_number', { length: 50 }), // Autorização
+   // Amounts
+   totalAmount: integer('total_amount').notNull(), // Valor total em centavos
+   receivedAmount: integer('received_amount').default(0), // Valor recebido em centavos
+   glosaAmount: integer('glosa_amount').default(0), // Valor glosado em centavos
+   // Dates
+   serviceDate: date('service_date').notNull(), // Data do atendimento
+   dueDate: date('due_date').notNull(), // Data de vencimento
+   receivedDate: date('received_date'), // Data do recebimento
+   // Status
+   status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, partial, received, overdue, glosa, cancelled
+   paymentType: varchar('payment_type', { length: 20 }).notNull(), // particular, insurance
+   notes: text('notes'),
+   klingoVoucherId: integer('klingo_voucher_id'), // Link to Klingo appointment
+   createdBy: uuid('created_by').references(() => users.id),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   patientIdx: index('accounts_receivable_patient_id_idx').on(table.patientId),
+   doctorIdx: index('accounts_receivable_doctor_id_idx').on(table.doctorId),
+   insuranceIdx: index('accounts_receivable_insurance_provider_id_idx').on(table.insuranceProviderId),
+   statusIdx: index('accounts_receivable_status_idx').on(table.status),
+   dueDateIdx: index('accounts_receivable_due_date_idx').on(table.dueDate),
+   serviceDateIdx: index('accounts_receivable_service_date_idx').on(table.serviceDate),
+   klingoIdx: index('accounts_receivable_klingo_voucher_id_idx').on(table.klingoVoucherId),
+}));
+
+// Receivable Installments (Parcelas a receber)
+export const receivableInstallments = pgTable('receivable_installments', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   accountReceivableId: uuid('account_receivable_id').references(() => accountsReceivable.id).notNull(),
+   installmentNumber: integer('installment_number').notNull(),
+   amount: integer('amount').notNull(), // centavos
+   dueDate: date('due_date').notNull(),
+   paidAmount: integer('paid_amount').default(0),
+   paidDate: date('paid_date'),
+   status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, paid, overdue, cancelled
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   accountReceivableIdx: index('receivable_installments_account_receivable_id_idx').on(table.accountReceivableId),
+   dueDateIdx: index('receivable_installments_due_date_idx').on(table.dueDate),
+   statusIdx: index('receivable_installments_status_idx').on(table.status),
+}));
+
+// Receivable Payments (Pagamentos recebidos)
+export const receivablePayments = pgTable('receivable_payments', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   accountReceivableId: uuid('account_receivable_id').references(() => accountsReceivable.id).notNull(),
+   installmentId: uuid('installment_id').references(() => receivableInstallments.id),
+   amount: integer('amount').notNull(), // centavos
+   paymentDate: date('payment_date').notNull(),
+   paymentMethod: varchar('payment_method', { length: 30 }).notNull(), // pix, ted, boleto, dinheiro, cheque, cartao
+   bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id),
+   transactionRef: varchar('transaction_ref', { length: 100 }),
+   notes: text('notes'),
+   receivedBy: uuid('received_by').references(() => users.id),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   accountReceivableIdx: index('receivable_payments_account_receivable_id_idx').on(table.accountReceivableId),
+   paymentDateIdx: index('receivable_payments_payment_date_idx').on(table.paymentDate),
+}));
+
+// ============================================
+// === FINANCIAL MODULE - Reimbursements & VT ===
+// ============================================
+
+// Reimbursement Requests (Solicitações de reembolso de viagem)
+export const reimbursementRequests = pgTable('reimbursement_requests', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   requestNumber: varchar('request_number', { length: 30 }).unique().notNull(),
+   employeeName: varchar('employee_name', { length: 255 }).notNull(),
+   employeeDepartment: varchar('employee_department', { length: 100 }),
+   employeeCpf: varchar('employee_cpf', { length: 14 }),
+   // Trip info
+   tripOrigin: varchar('trip_origin', { length: 100 }),
+   tripDestination: varchar('trip_destination', { length: 100 }),
+   tripStartDate: date('trip_start_date').notNull(),
+   tripEndDate: date('trip_end_date').notNull(),
+   tripPurpose: text('trip_purpose'),
+   // Bank info for deposit
+   bankName: varchar('bank_name', { length: 100 }),
+   bankAgency: varchar('bank_agency', { length: 20 }),
+   bankAccount: varchar('bank_account', { length: 30 }),
+   bankAccountType: varchar('bank_account_type', { length: 20 }),
+   pixKey: varchar('pix_key', { length: 100 }),
+   // Totals
+   totalAmount: integer('total_amount').default(0), // centavos (sum of items)
+   approvedAmount: integer('approved_amount'), // centavos
+   // Status
+   status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, approved, rejected, paid
+   requestedBy: uuid('requested_by').references(() => users.id),
+   approvedBy: uuid('approved_by').references(() => users.id),
+   approvedAt: timestamp('approved_at', { withTimezone: true }),
+   paidAt: timestamp('paid_at', { withTimezone: true }),
+   rejectionReason: text('rejection_reason'),
+   notes: text('notes'),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   requestNumberIdx: uniqueIndex('reimbursement_requests_request_number_idx').on(table.requestNumber),
+   statusIdx: index('reimbursement_requests_status_idx').on(table.status),
+   employeeIdx: index('reimbursement_requests_employee_name_idx').on(table.employeeName),
+}));
+
+// Reimbursement Items (Itens do reembolso)
+export const reimbursementItems = pgTable('reimbursement_items', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   reimbursementRequestId: uuid('reimbursement_request_id').references(() => reimbursementRequests.id).notNull(),
+   expenseDate: date('expense_date').notNull(),
+   expenseType: varchar('expense_type', { length: 50 }).notNull(), // alimentacao, transporte, hospedagem, combustivel, pedagio, outros
+   description: text('description'),
+   receiptNumber: varchar('receipt_number', { length: 50 }), // Cupom fiscal
+   amount: integer('amount').notNull(), // centavos
+   attachmentUrl: text('attachment_url'),
+   approved: boolean('approved'),
+   approvedAmount: integer('approved_amount'), // centavos (pode ser diferente do solicitado)
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   reimbursementRequestIdx: index('reimbursement_items_reimbursement_request_id_idx').on(table.reimbursementRequestId),
+   expenseDateIdx: index('reimbursement_items_expense_date_idx').on(table.expenseDate),
+}));
+
+// Transport Vouchers (Vale-transporte CLTs)
+export const transportVouchers = pgTable('transport_vouchers', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   employeeName: varchar('employee_name', { length: 255 }).notNull(),
+   employeeCpf: varchar('employee_cpf', { length: 14 }),
+   employeeRole: varchar('employee_role', { length: 100 }),
+   contractType: varchar('contract_type', { length: 20 }).notNull(), // clt, pj, estagiario
+   costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+   // Monthly values
+   monthlyAmount: integer('monthly_amount').notNull(), // centavos
+   referenceMonth: varchar('reference_month', { length: 7 }).notNull(), // YYYY-MM
+   workDays: integer('work_days'), // dias trabalhados
+   dailyAmount: integer('daily_amount'), // valor diário em centavos
+   // Status
+   status: varchar('status', { length: 20 }).default('pending').notNull(), // pending, paid
+   paidAt: timestamp('paid_at', { withTimezone: true }),
+   notes: text('notes'),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   employeeIdx: index('transport_vouchers_employee_name_idx').on(table.employeeName),
+   referenceMonthIdx: index('transport_vouchers_reference_month_idx').on(table.referenceMonth),
+   statusIdx: index('transport_vouchers_status_idx').on(table.status),
+   costCenterIdx: index('transport_vouchers_cost_center_id_idx').on(table.costCenterId),
+}));
+
+// ============================================
+// === FINANCIAL MODULE - Cash Flow ===
+// ============================================
+
+// Daily Cash Flow Snapshots (Posição diária consolidada)
+export const cashFlowSnapshots = pgTable('cash_flow_snapshots', {
+   id: uuid('id').primaryKey().defaultRandom(),
+   snapshotDate: date('snapshot_date').notNull(),
+   costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+   // Balances
+   openingBalance: integer('opening_balance').notNull(), // Saldo inicial em centavos
+   totalCredits: integer('total_credits').default(0), // Total de entradas
+   totalDebits: integer('total_debits').default(0), // Total de saídas
+   closingBalance: integer('closing_balance').notNull(), // Saldo final
+   // Breakdown by category
+   revenueBreakdown: jsonb('revenue_breakdown'), // { "particular": 1000, "convenio": 2000, ... }
+   expenseBreakdown: jsonb('expense_breakdown'), // { "pessoal": 5000, "impostos": 2000, ... }
+   // Metadata
+   isProjected: boolean('is_projected').default(false), // true = projeção, false = realizado
+   notes: text('notes'),
+   generatedBy: uuid('generated_by').references(() => users.id),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   snapshotDateIdx: index('cash_flow_snapshots_snapshot_date_idx').on(table.snapshotDate),
+   costCenterIdx: index('cash_flow_snapshots_cost_center_id_idx').on(table.costCenterId),
+   dateAndCenterIdx: uniqueIndex('cash_flow_snapshots_date_center_idx').on(table.snapshotDate, table.costCenterId),
+}));
