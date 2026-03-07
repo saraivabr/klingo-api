@@ -47,18 +47,59 @@ export const welcomeButtons: ButtonTemplate = {
 };
 
 // ============================================================================
-// 2. SCHEDULING PERIOD SELECTION
+// 2. TRIAGE - MANDATORY BEFORE SCHEDULING
+// ============================================================================
+
+/**
+ * TRIAGEM OBRIGATÓRIA - Perguntar motivo ANTES de agendar
+ * SEMPRE usar este template quando paciente diz "Quero agendar"
+ */
+export const triageButtons: ButtonTemplate = {
+  text: "Que bom que voce quer cuidar da saude! 😊 Me conta, o que ta te trazendo aqui hoje?",
+  buttons: [
+    { id: "sintoma", text: "Estou com sintoma" },
+    { id: "checkup", text: "Quero check-up" },
+    { id: "exame", text: "Tenho pedido de exame" },
+  ],
+};
+
+/**
+ * Lista de categorias de sintomas para triagem
+ */
+export const symptomCategoriesList: ListTemplate = {
+  text: "Entendi! Me conta um pouquinho mais, onde ta o desconforto?",
+  buttonText: "Ver categorias",
+  sections: [
+    {
+      title: "Escolha a area",
+      items: [
+        { id: "cabeca", title: "Dor de cabeca / Tontura", description: "Neurologista" },
+        { id: "coracao", title: "Coracao / Pressao", description: "Cardiologista" },
+        { id: "costas", title: "Costas / Articulacoes", description: "Reumatologista" },
+        { id: "urinario", title: "Problemas urinarios", description: "Urologista" },
+        { id: "ansiedade", title: "Ansiedade / Insonia", description: "Psiquiatra" },
+        { id: "pele", title: "Pele / Estetica", description: "Dermatologista" },
+        { id: "digestao", title: "Digestao / Estomago", description: "Gastro/Clinico" },
+        { id: "outro", title: "Outro sintoma", description: "Vou te ajudar!" },
+      ],
+    },
+  ],
+};
+
+// ============================================================================
+// 3. SCHEDULING PERIOD SELECTION (ONLY AFTER TRIAGE!)
 // ============================================================================
 
 /**
  * Ask patient for preferred time period
+ * IMPORTANTE: Só usar DEPOIS de identificar especialista via triagem!
  */
 export const periodButtons: ButtonTemplate = {
-  text: "Em menos de 1 minuto voce resolve! Qual periodo fica melhor? 😊",
+  text: "Perfeito! Qual periodo fica melhor pra voce? 😊",
   buttons: [
-    { id: "manha", text: "🌅 Manhã (7h-12h)" },
-    { id: "tarde", text: "🌇 Tarde (13h-18h)" },
-    { id: "qualquer", text: "✨ Qualquer horário" },
+    { id: "manha", text: "Manha (7h-12h)" },
+    { id: "tarde", text: "Tarde (13h-18h)" },
+    { id: "qualquer", text: "Qualquer horario" },
   ],
 };
 
@@ -192,7 +233,24 @@ export const previousPatientButtons: ButtonTemplate = {
 };
 
 // ============================================================================
-// 7. POST-BOOKING CONFIRMATION
+// 7. POST-LINK (AFTER SENDING BOOKING LINK)
+// ============================================================================
+
+/**
+ * SEMPRE usar depois de enviar link de agendamento
+ * Dá clareza sobre próximos passos
+ */
+export const postLinkButtons: ButtonTemplate = {
+  text: "Qualquer coisa, me avisa aqui! 😊",
+  buttons: [
+    { id: "ja_agendei", text: "Ja escolhi horario" },
+    { id: "ajuda", text: "Preciso de ajuda" },
+    { id: "cancelar", text: "Cancelar" },
+  ],
+};
+
+// ============================================================================
+// 8. POST-BOOKING CONFIRMATION (AFTER PATIENT CONFIRMS)
 // ============================================================================
 
 /**
@@ -201,14 +259,43 @@ export const previousPatientButtons: ButtonTemplate = {
 export const postBookingButtons: ButtonTemplate = {
   text: "Prontinho, ta tudo certo! Voce tomou uma otima decisao 🎉",
   buttons: [
-    { id: "comprovante", text: "Ver comprovante" },
-    { id: "duvidas", text: "Tenho duvidas" },
+    { id: "como_chegar", text: "Como chegar" },
+    { id: "preparo", text: "Preparo necessario" },
     { id: "ok", text: "Valeu, Julia!" },
   ],
 };
 
 // ============================================================================
-// 8. CANCELLATION CONFIRMATION
+// 9. EXAM TYPE SELECTION (BUTTONS, NOT LIST!)
+// ============================================================================
+
+/**
+ * Tipo de exame - usar botões ao invés de lista
+ * WhatsApp não exibe listas bem em todos os dispositivos
+ */
+export const examTypeButtons: ButtonTemplate = {
+  text: "Qual tipo de exame voce precisa fazer?",
+  buttons: [
+    { id: "imagem", text: "Exame de imagem" },
+    { id: "sangue", text: "Exame de sangue" },
+    { id: "outro", text: "Outro exame" },
+  ],
+};
+
+/**
+ * Exames de imagem específicos
+ */
+export const imagingExamButtons: ButtonTemplate = {
+  text: "Qual exame de imagem voce precisa?",
+  buttons: [
+    { id: "eco", text: "Ecocardiograma" },
+    { id: "ultrassom", text: "Ultrassom" },
+    { id: "outro_img", text: "Outro" },
+  ],
+};
+
+// ============================================================================
+// 10. CANCELLATION CONFIRMATION
 // ============================================================================
 
 /**
@@ -238,12 +325,17 @@ export const getTemplate = (
     ButtonTemplate | ListTemplate | ((params: Record<string, string>) => ButtonTemplate)
   > = {
     welcome: welcomeButtons,
+    triage: triageButtons,
+    symptoms: symptomCategoriesList,
     period: periodButtons,
     confirmation: (p) => confirmationButtons(p.date, p.time, p.doctor),
     specialties: specialtiesList,
     returning: returningPatientButtons,
     previousPatient: previousPatientButtons,
+    postLink: postLinkButtons,
     postBooking: postBookingButtons,
+    examType: examTypeButtons,
+    imagingExam: imagingExamButtons,
     cancelConfirm: cancelConfirmButtons,
   };
 
