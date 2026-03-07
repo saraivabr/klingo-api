@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid';
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
@@ -137,7 +138,31 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
           const end = new Date(now);
           end.setDate(end.getDate() + 8);
 
-          const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/agenda/horarios?inicio=${start.toISOString().split('T')[0]}&fim=${end.toISOString().split('T')[0]}`, {
+          // Resolve specialty name to Klingo ID
+          let especialidadeId: number | undefined;
+          try {
+            const specRes = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/agenda/especialidades`, {
+              headers: { 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN },
+            });
+            if (specRes.ok) {
+              const specData = await specRes.json() as { data?: Array<{ id: number; nome: string }> };
+              const specs = Array.isArray(specData.data) ? specData.data : (Array.isArray(specData) ? specData as any[] : []);
+              const match = specs.find((s: any) =>
+                s.nome && s.nome.toLowerCase().includes(specialty.toLowerCase())
+              );
+              if (match) especialidadeId = match.id;
+            }
+          } catch (specErr) {
+            console.warn('[ai-pipeline] Could not fetch specialties:', specErr);
+          }
+
+          const params = new URLSearchParams({
+            inicio: start.toISOString().split('T')[0],
+            fim: end.toISOString().split('T')[0],
+          });
+          if (especialidadeId) params.set('especialidade', String(especialidadeId));
+
+          const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/agenda/horarios?${params.toString()}`, {
             headers: {
               'Accept': 'application/json',
               'X-APP-TOKEN': KLINGO_APP_TOKEN,
@@ -145,12 +170,12 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
           });
 
           if (res.ok) {
-            const data = await res.json() as { data?: Array<{ data: string; hora: string; nome_medico: string; especialidade: string }> };
+            const data = await res.json() as { data?: Array<{ id: number; data: string; hora: string; nome_medico: string; especialidade: string }> };
             const extSlots = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data as any[] : []);
 
-            // Filter by specialty if possible
+            // Additional client-side filter by specialty name if Klingo ID was not resolved
             const filtered = extSlots.filter((s: any) =>
-              !specialty || (s.especialidade && s.especialidade.toLowerCase().includes(specialty.toLowerCase()))
+              especialidadeId || !specialty || (s.especialidade && s.especialidade.toLowerCase().includes(specialty.toLowerCase()))
             ).slice(0, 6);
 
             if (filtered.length > 0) {
@@ -159,6 +184,7 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
                 source: 'klingo_external',
                 doctors: doctors.map(d => ({ name: d.name, crm: d.crm })),
                 nextSlots: filtered.map((s: any) => ({
+                  id: s.id,
                   date: s.data,
                   time: s.hora,
                   doctor: s.nome_medico,
@@ -173,12 +199,14 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         }
       }
 
-      // Fallback: generic availability info
+      // Fallback: inform that no slots were found — do NOT invent fake slots
       return JSON.stringify({
-        available: true,
+        available: doctors.length > 0,
         doctors: doctors.map(d => ({ name: d.name, crm: d.crm })),
-        nextSlots: ['Amanhã às 9h', 'Amanhã às 14h', 'Quinta-feira às 10h'],
-        message: `Temos ${doctors.length} médico(s) disponível(is) em ${specialty}`,
+        nextSlots: [],
+        message: doctors.length > 0
+          ? `Temos ${doctors.length} médico(s) de ${specialty}, mas não consegui consultar os horários agora. Sugira ao paciente usar o link de agendamento para ver horários em tempo real.`
+          : `Não encontrei médicos para ${specialty}. Verifique a especialidade ou sugira ao paciente entrar em contato com a recepção.`,
       });
     }
 
@@ -196,11 +224,15 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
 
       // Find doctor
       let doctorId: string | undefined;
+      let doctorKlingoId: number | undefined;
       if (doctorNameInput) {
         const [doctor] = await db.select().from(schema.doctors)
           .where(ilike(schema.doctors.name, `%${doctorNameInput}%`))
           .limit(1);
-        if (doctor) doctorId = doctor.id;
+        if (doctor) {
+          doctorId = doctor.id;
+          doctorKlingoId = doctor.klingoId ?? undefined;
+        }
       }
 
       // Find service
@@ -230,12 +262,14 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
 
       // Find or create patient
       let patientId: string | undefined;
+      let patientKlingoId: number | undefined;
       if (context?.patientPhone) {
         const [patient] = await db.select().from(schema.patients)
           .where(eq(schema.patients.phone, context.patientPhone))
           .limit(1);
         if (patient) {
           patientId = patient.id;
+          patientKlingoId = patient.klingoPatientId ?? undefined;
           if (!patient.name && patientNameInput) {
             await db.update(schema.patients)
               .set({ name: patientNameInput, updatedAt: new Date() })
@@ -249,7 +283,10 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         }
       }
 
-      // Create the appointment
+      // Create the appointment locally
+      const KLINGO_APP_TOKEN_BOOK = process.env.KLINGO_APP_TOKEN;
+      const KLINGO_BASE_BOOK = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
+
       const [appointment] = await db.insert(schema.appointments).values({
         patientId,
         doctorId,
@@ -258,7 +295,79 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         status: 'scheduled',
         createdBy: 'ai',
         conversationMongoId: context?.conversationId,
+        klingoSyncStatus: KLINGO_APP_TOKEN_BOOK ? 'pending' : 'skipped',
       }).returning({ id: schema.appointments.id });
+
+      // Sync with Klingo: reserve slot + confirm booking
+      let klingoSynced = false;
+      if (KLINGO_APP_TOKEN_BOOK && patientKlingoId) {
+        try {
+          // First, find matching slot in Klingo
+          const dateStr = scheduledAt.toISOString().split('T')[0];
+          const slotsRes = await fetch(`${KLINGO_BASE_BOOK}/api/agenda/horarios?inicio=${dateStr}&fim=${dateStr}`, {
+            headers: { 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN_BOOK },
+          });
+
+          if (slotsRes.ok) {
+            const slotsData = await slotsRes.json() as { data?: Array<{ id: number; data: string; hora: string; id_medico: number }> };
+            const slots = Array.isArray(slotsData.data) ? slotsData.data : [];
+            const timeStr = scheduledAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+            // Match by time (and doctor if available)
+            const matchingSlot = slots.find(s =>
+              s.hora === timeStr && (!doctorKlingoId || s.id_medico === doctorKlingoId)
+            ) || slots.find(s => s.hora === timeStr);
+
+            if (matchingSlot) {
+              // Reserve the slot (10 min hold)
+              const reserveRes = await fetch(`${KLINGO_BASE_BOOK}/api/agenda/reservar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN_BOOK },
+                body: JSON.stringify({ id_horario: matchingSlot.id, id_paciente: patientKlingoId }),
+              });
+
+              if (reserveRes.ok) {
+                const reserveData = await reserveRes.json() as { data?: { id: string } };
+                const reservationId = reserveData.data?.id;
+
+                if (reservationId) {
+                  // Confirm the booking
+                  const confirmRes = await fetch(`${KLINGO_BASE_BOOK}/api/agenda/horario`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN_BOOK },
+                    body: JSON.stringify({ id_reserva: reservationId, id_paciente: patientKlingoId }),
+                  });
+
+                  if (confirmRes.ok) {
+                    const confirmData = await confirmRes.json() as { data?: { voucher_id: number } };
+                    await db.update(schema.appointments).set({
+                      klingoSyncStatus: 'synced',
+                      klingoVoucherId: confirmData.data?.voucher_id ?? null,
+                      klingoReservationId: reservationId,
+                    }).where(eq(schema.appointments.id, appointment.id));
+                    klingoSynced = true;
+                    console.log(`[ai-pipeline] Klingo booking synced: voucher=${confirmData.data?.voucher_id}`);
+                  }
+                }
+              }
+            }
+          }
+
+          if (!klingoSynced) {
+            await db.update(schema.appointments).set({
+              klingoSyncStatus: 'failed',
+              klingoSyncError: 'No matching slot found in Klingo or reservation failed',
+            }).where(eq(schema.appointments.id, appointment.id));
+            console.warn('[ai-pipeline] Klingo sync failed: no matching slot or reservation error');
+          }
+        } catch (klingoErr) {
+          console.error('[ai-pipeline] Klingo booking sync error:', klingoErr);
+          await db.update(schema.appointments).set({
+            klingoSyncStatus: 'failed',
+            klingoSyncError: (klingoErr as Error).message,
+          }).where(eq(schema.appointments.id, appointment.id));
+        }
+      }
 
       const dateFormatted = scheduledAt.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
       const timeFormatted = scheduledAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -266,6 +375,7 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
       return JSON.stringify({
         success: true,
         appointmentId: appointment.id,
+        klingoSynced,
         message: `Agendamento confirmado para ${dateFormatted} às ${timeFormatted}`,
         details: {
           patient: patientNameInput,
@@ -365,8 +475,7 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
 
       return JSON.stringify({
         success: true,
-        message: 'Mensagem interativa configurada com sucesso.',
-        instructions: 'O texto que você definiu no campo "text" da mensagem interativa SERÁ exibido ao paciente junto com os botões/lista. Se quiser adicionar uma mensagem conversacional ANTES dos botões (ex: saudação, contexto emocional), escreva na sua resposta de texto normal. NÃO repita o conteúdo que já está no campo "text" da mensagem interativa.',
+        message: 'Mensagem interativa configurada! Os botões serão enviados automaticamente após sua resposta de texto.',
         type: messageType,
         interactiveText: text,
         optionsCount: messageType === 'buttons' ? buttons?.length : listSections?.reduce((acc, s) => acc + s.items.length, 0),
@@ -461,12 +570,19 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
       )[0];
 
       // Try to cancel via External API
+      let klingoCancelled = false;
       if (KLINGO_APP_TOKEN && nextAppt.klingoVoucherId) {
         try {
-          await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/voucher?id=${nextAppt.klingoVoucherId}`, {
+          const cancelRes = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/voucher?id=${nextAppt.klingoVoucherId}`, {
             method: 'DELETE',
             headers: { 'X-APP-TOKEN': KLINGO_APP_TOKEN, 'Accept': 'application/json' },
           });
+          if (cancelRes.ok) {
+            klingoCancelled = true;
+          } else {
+            const errText = await cancelRes.text();
+            console.error(`[ai-pipeline] Klingo cancel returned ${cancelRes.status}: ${errText}`);
+          }
         } catch (err) {
           console.error('[ai-pipeline] External API cancel error:', err);
         }
@@ -474,7 +590,10 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
 
       // Update local status
       await db.update(schema.appointments)
-        .set({ status: 'cancelled' })
+        .set({
+          status: 'cancelled',
+          klingoSyncStatus: klingoCancelled ? 'synced' : (nextAppt.klingoVoucherId ? 'failed' : 'skipped'),
+        })
         .where(eq(schema.appointments.id, nextAppt.id));
 
       const dateFormatted = new Date(nextAppt.scheduledAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
@@ -784,14 +903,92 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   }
 
   const latencyMs = Date.now() - startTime;
-  const aiText = response.text;
+  // Strip tool name leaks from AI text (model sometimes writes tool names as text)
+  const TOOL_NAMES = ['send_interactive_message', 'check_availability', 'get_service_price', 'book_appointment', 'get_knowledge', 'generate_booking_link', 'escalate_to_human', 'cancel_appointment', 'get_patient_appointments', 'check_exam_results', 'send_location', 'generate_teleconsultation_link'];
+  let aiText = response.text;
+  for (const toolName of TOOL_NAMES) {
+    aiText = aiText.replace(new RegExp(`\\b${toolName}\\b`, 'gi'), '').trim();
+  }
+  // Remove leftover empty lines
+  aiText = aiText.replace(/\n{3,}/g, '\n\n').trim();
+
+  // Auto-detect bullet points / numbered lists and convert to interactive buttons
+  // This catches cases where the AI writes options as text instead of calling the tool
+  if (!interactiveHolder.message) {
+    const bulletRegex = /^[\s]*(?:[•\-\*]|\d+[\.\)])\s*(.+)$/gm;
+    const bullets: string[] = [];
+    let match;
+    while ((match = bulletRegex.exec(aiText)) !== null) {
+      const item = match[1].trim();
+      if (item.length > 0 && item.length <= 40) bullets.push(item);
+    }
+
+    if (bullets.length >= 2 && bullets.length <= 3) {
+      // Extract the text BEFORE the bullet points as the interactive text
+      const firstBulletIndex = aiText.search(/^[\s]*(?:[•\-\*]|\d+[\.\)])\s*/m);
+      const textBefore = firstBulletIndex > 0 ? aiText.substring(0, firstBulletIndex).trim() : '';
+      const interactiveText = textBefore || 'Escolha uma das opções:';
+
+      interactiveHolder.message = {
+        type: 'buttons',
+        text: interactiveText,
+        buttons: bullets.map((b, i) => ({
+          id: b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').substring(0, 20),
+          text: b.length > 20 ? b.substring(0, 19) + '…' : b,
+        })),
+        footerText: 'IRB Prime Care',
+      };
+
+      // Remove bullet points from AI text since they'll be buttons now
+      aiText = textBefore;
+      console.log('[AI-PIPELINE] Auto-converted bullet points to buttons:', interactiveHolder.message.buttons);
+    } else if (bullets.length > 3 && bullets.length <= 10) {
+      // Too many for buttons, use a list
+      const firstBulletIndex = aiText.search(/^[\s]*(?:[•\-\*]|\d+[\.\)])\s*/m);
+      const textBefore = firstBulletIndex > 0 ? aiText.substring(0, firstBulletIndex).trim() : '';
+      const interactiveText = textBefore || 'Escolha uma das opções:';
+
+      interactiveHolder.message = {
+        type: 'list',
+        text: interactiveText,
+        listButtonText: 'Ver opções',
+        listSections: [{
+          title: 'Opções',
+          items: bullets.map((b, i) => ({
+            id: b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').substring(0, 20),
+            title: b.length > 24 ? b.substring(0, 23) + '…' : b,
+          })),
+        }],
+        footerText: 'IRB Prime Care',
+      };
+
+      aiText = textBefore;
+      console.log('[AI-PIPELINE] Auto-converted bullet points to list:', bullets.length, 'items');
+    }
+  }
 
   // 8. Check escalation
+  // Derive AI confidence from stop reason and tool usage
+  const aiConfidence = response.stopReason === 'stop' && toolsUsed.length > 0 ? 0.85
+    : response.stopReason === 'stop' ? 0.7
+    : 0.5;
+
+  // Track consecutive unknowns from conversation history
+  let consecutiveUnknowns = 0;
+  const recentAiMsgs = [...conversation.messages].reverse().filter(m => m.sender === 'ai');
+  for (const msg of recentAiMsgs) {
+    if (msg.aiMetadata?.intentClassified === 'unknown' || msg.aiMetadata?.intentClassified === 'other') {
+      consecutiveUnknowns++;
+    } else {
+      break;
+    }
+  }
+
   const escalationCheck = checkEscalation({
     patientMessage: text,
-    aiConfidence: 0.8, // TODO: extract from Claude response
+    aiConfidence,
     intent,
-    consecutiveUnknowns: 0,
+    consecutiveUnknowns,
     sentimentScore: conversation.sentimentScore,
   });
 
@@ -907,6 +1104,15 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     sendJobData.interactive = interactiveHolder.message;
   } else {
     console.log('[AI-PIPELINE] No interactive message pending');
+    
+    // Detect if AI promised buttons but didn't call the tool
+    const promisedButtons = /vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista)/i.test(aiText);
+    if (promisedButtons) {
+      console.warn('[AI-PIPELINE] ⚠️ AI PROMISED BUTTONS BUT DID NOT CALL TOOL!');
+      console.warn('[AI-PIPELINE] Response text:', aiText);
+      console.warn('[AI-PIPELINE] Tools used:', toolsUsed);
+      // This is logged for monitoring - indicates prompt needs improvement
+    }
   }
 
   // If send_location tool was used, flag to send location

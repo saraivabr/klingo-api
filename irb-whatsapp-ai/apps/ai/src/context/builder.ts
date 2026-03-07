@@ -41,7 +41,7 @@ export function buildContext(params: {
   }
 
   // Adicionar hints contextuais baseado no estado da conversa
-  const conversationText = conversation.messages.map((m) => m.text.toLowerCase()).join(' ');
+  const conversationText = conversation.messages.map((m) => (m.text || '').toLowerCase()).join(' ');
   
   // Detectar intenção de agendamento
   const hasSchedulingIntent = /agendar|consulta|horário|horario|período|periodo|dia|semana/i.test(conversationText);

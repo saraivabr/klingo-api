@@ -6,6 +6,7 @@ const messageIntakeQueue = new Queue(QUEUE_NAMES.MESSAGE_INTAKE, {
   connection: {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379'),
+    password: process.env.REDIS_PASSWORD || undefined,
   },
 });
 
@@ -109,6 +110,27 @@ function mapMessageType(uazapiType: string | undefined): 'text' | 'image' | 'aud
 
 export async function uazapiWebhookRoutes(app: FastifyInstance) {
   app.post('/uazapi', async (request, reply) => {
+    // Webhook authentication - REQUIRED for security
+    const WEBHOOK_TOKEN = process.env.UAZAPI_WEBHOOK_TOKEN;
+    
+    if (!WEBHOOK_TOKEN) {
+      app.log.error('[uazapi-webhook] UAZAPI_WEBHOOK_TOKEN not configured - rejecting request');
+      return reply.code(500).send({ 
+        error: 'Server misconfigured', 
+        message: 'Webhook authentication not configured' 
+      });
+    }
+    
+    const providedToken = request.headers['x-webhook-token'];
+    
+    if (providedToken !== WEBHOOK_TOKEN) {
+      app.log.warn({
+        ip: request.ip,
+        providedToken: providedToken ? '***' : undefined,
+      }, '[uazapi-webhook] Unauthorized webhook request');
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+    
     const body = request.body as UazapiWebhookBody;
 
     // Extract message from nested structure or flat structure

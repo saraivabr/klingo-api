@@ -477,7 +477,7 @@ export async function sendPixButton(
  */
 export async function getInstanceStatus(): Promise<string> {
   try {
-    const response = await fetch(`${UAZAPI_URL}/instance`, {
+    const response = await fetch(`${UAZAPI_URL}/instance/status`, {
       headers: { 'token': UAZAPI_TOKEN },
     });
 
@@ -493,5 +493,5 @@ export async function getInstanceStatus(): Promise<string> {
  * Download de mídia de uma mensagem
  */
 export async function downloadMedia(messageId: string): Promise<{ base64?: string; url?: string }> {
-  return uazapiRequest('/message/download', { messageId });
+  return uazapiRequest('/message/download', { id: messageId });
 }

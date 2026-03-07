@@ -32,6 +32,7 @@ function buildGoogleCalendarUrl(params: {
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
@@ -125,8 +126,21 @@ export async function bookingRoutes(app: FastifyInstance) {
           if (doc?.crm) crm = doc.crm;
         }
 
+        // Resolve specialty name to Klingo ID
+        let especialidadeId: number | undefined;
+        try {
+          const specResult = await klingoExt.getSpecialties();
+          const specs = Array.isArray(specResult.data) ? specResult.data : [];
+          const match = specs.find(s =>
+            s.nome && s.nome.toLowerCase().includes(link.specialty.toLowerCase())
+          );
+          if (match) especialidadeId = match.id;
+        } catch (specErr) {
+          console.warn('[booking] Could not fetch specialties for mapping:', specErr);
+        }
+
         const result = await klingoExt.getAvailableSlots({
-          especialidade: undefined, // TODO: map specialty name to Klingo ID
+          especialidade: especialidadeId,
           inicio: start.toISOString().split('T')[0],
           fim: end.toISOString().split('T')[0],
           crm,
@@ -384,6 +398,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       const notifyPhone = process.env.TEAM_NOTIFY_PHONE;
       if (notifyPhone) {
         await messageSendQueue.add('send', {
+          conversationId: `team-fallback-${result.appointmentId}`,
           patientPhone: notifyPhone,
           text: `⚠️ Agendamento FALLBACK criado (sem slot Klingo):\n\nPaciente: ${patientName}\nData: ${slotDate.toLocaleDateString('pt-BR')}\nHorário: ${slotDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}\n\nPor favor, confirme manualmente no Klingo.`,
           instanceName: 'uazapi',

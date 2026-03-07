@@ -1,11 +1,12 @@
 import { Job, Queue } from 'bullmq';
-import { db, schema, redis } from '@irb/database';
+import { db, schema, redis, ConversationModel } from '@irb/database';
 import { QUEUE_NAMES } from '@irb/shared/constants';
 import { eq } from 'drizzle-orm';
 
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
@@ -31,14 +32,31 @@ export async function processNpsCollection(job: Job<NpsJobData>) {
 
   const firstName = patient.name?.split(' ')[0] || 'Paciente';
 
+  // Find or create conversation for NPS tracking
+  let instanceName = 'uazapi';
+  let conversationId: string | undefined;
+  const conversation = await ConversationModel.findOne({
+    patientPhone: patient.phone,
+  }).sort({ lastMessageAt: -1 });
+  if (conversation) {
+    conversationId = conversation._id.toString();
+    instanceName = conversation.instanceName || 'uazapi';
+  }
+
+  if (!conversationId) {
+    console.log(`[nps] No conversation found for ${patient.phone}, skipping`);
+    return { status: 'skipped', reason: 'no_conversation' };
+  }
+
   // Store NPS pending in Redis (so button handler knows which marcacao to report)
   await redis.set(`nps_pending:${patient.phone}`, String(klingoMarcacaoId), 'EX', 48 * 60 * 60);
 
   // Send NPS message with list of options
   await messageSendQueue.add('send', {
+    conversationId,
     patientPhone: patient.phone,
     text: '',
-    instanceName: 'uazapi',
+    instanceName,
     interactive: {
       type: 'list' as const,
       text: `Oi ${firstName}! 😊 Como foi seu atendimento hoje na IRB Prime Care?\n\nDe 0 a 10, o quanto você recomendaria a IRB pra um amigo ou familiar?`,

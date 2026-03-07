@@ -6,6 +6,7 @@ import { QUEUE_NAMES } from '@irb/shared/constants';
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
@@ -54,9 +55,22 @@ export async function processTeleconsultationReminder(job: Job<ReminderJobData>)
     text = `${firstName ? `${firstName}, ` : ''}Sua teleconsulta começa em 5 minutos! 🎥\n\nClique para entrar na sala de espera:\n\n${link}`;
   }
 
-  await messageSendQueue.add('teleconsultation-reminder', {
-    phone: room.patientPhone,
+  // Find conversation for this patient to get conversationId
+  const { ConversationModel } = await import('@irb/database');
+  let conversationId = '';
+  const existingConv = await ConversationModel.findOne({
+    patientPhone: room.patientPhone,
+    status: { $ne: 'closed' },
+  }).sort({ lastMessageAt: -1 });
+  if (existingConv) {
+    conversationId = existingConv._id.toString();
+  }
+
+  await messageSendQueue.add('send', {
+    conversationId,
+    patientPhone: room.patientPhone,
     text,
+    instanceName: 'uazapi',
   }, { removeOnComplete: 50 });
 
   return { status: 'sent', minutesBefore, teleconsultationId };

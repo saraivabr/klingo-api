@@ -168,18 +168,8 @@ export async function processMessageSend(job: Job<SendJobData>) {
 
   // Handle interactive messages (buttons/lists)
   if (interactive) {
-    // Send AI conversational text BEFORE the interactive message (if different)
-    const aiTextDiffers = text && text.trim() && text.trim() !== interactive.text.trim();
-    if (aiTextDiffers) {
-      const textParts = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
-      for (const part of textParts) {
-        const typingDelay = calculateTypingDelay(part);
-        await sendPresence(phone, typingDelay);
-        await sleep(typingDelay);
-        const result = await sendText(phone, part);
-        if (result.key?.id) lastMessageId = result.key.id;
-      }
-    }
+    // The interactive message already has its own text field — no need to send AI text separately.
+    // This avoids duplicate content (AI tends to repeat button options as bullet points).
 
     // Send the interactive message with try/catch fallback
     const typingDelay = calculateTypingDelay(interactive.text);

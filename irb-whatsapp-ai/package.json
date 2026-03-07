@@ -11,6 +11,7 @@
     "db:generate": "pnpm --filter @irb/database db:generate",
     "db:migrate": "pnpm --filter @irb/database db:migrate",
     "db:seed": "pnpm --filter @irb/database db:seed",
+    "db:indexes": "node scripts/add-mongodb-indexes.js",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "docker:up": "docker-compose up -d",

@@ -1,7 +1,7 @@
 import { Job, Queue } from 'bullmq';
-import { db, schema } from '@irb/database';
+import { db, schema, ConversationModel } from '@irb/database';
 import { QUEUE_NAMES } from '@irb/shared/constants';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 
 const KLINGO_APP_TOKEN = process.env.KLINGO_APP_TOKEN;
 const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
@@ -9,6 +9,7 @@ const KLINGO_EXTERNAL_BASE_URL = process.env.KLINGO_EXTERNAL_BASE_URL || 'https:
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
@@ -60,22 +61,57 @@ export async function processAppointmentConfirmation(job: Job<ConfirmationJobDat
     };
 
     const appointments = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data as any[] : []);
+    
+    // Filter and normalize phones upfront
+    const appointmentsWithPhones = appointments
+      .filter(apt => apt.status_confirmacao !== 'C')  // Skip already confirmed
+      .map(apt => {
+        const phone = apt.telefone?.replace(/\D/g, '');
+        if (!phone || phone.length < 10) return null;
+        const normalizedPhone = phone.startsWith('55') ? phone : `55${phone}`;
+        return { ...apt, normalizedPhone };
+      })
+      .filter((apt): apt is NonNullable<typeof apt> => apt !== null);
+
+    if (appointmentsWithPhones.length === 0) {
+      console.log(`[appointment-confirmation] No valid appointments to process for ${tomorrowStr}`);
+      return { status: 'processed', sent: 0, date: tomorrowStr };
+    }
+
+    const phones = appointmentsWithPhones.map(apt => apt.normalizedPhone);
+
+    // BATCH QUERY 1: Get all patients in one query
+    const patients = await db.select({ id: schema.patients.id, phone: schema.patients.phone })
+      .from(schema.patients)
+      .where(inArray(schema.patients.phone, phones));
+    
+    const patientMap = new Map(patients.map(p => [p.phone, p]));
+
+    // BATCH QUERY 2: Get all conversations in one query
+    const conversations = await ConversationModel.find({
+      patientPhone: { $in: phones }
+    }).sort({ lastMessageAt: -1 });
+
+    // Build conversation map (keep only most recent per phone)
+    const conversationMap = new Map<string, { id: string; instanceName: string }>();
+    for (const conv of conversations) {
+      if (!conversationMap.has(conv.patientPhone)) {
+        conversationMap.set(conv.patientPhone, {
+          id: conv._id.toString(),
+          instanceName: conv.instanceName || 'uazapi',
+        });
+      }
+    }
+
+    // Now send messages (fast - only memory operations and queue adds)
     let sent = 0;
-
-    for (const apt of appointments) {
-      // Skip already confirmed
-      if (apt.status_confirmacao === 'C') continue;
-
-      // Normalize phone
-      const phone = apt.telefone?.replace(/\D/g, '');
-      if (!phone || phone.length < 10) continue;
-      const normalizedPhone = phone.startsWith('55') ? phone : `55${phone}`;
-
-      // Find patient in our DB
-      const [patient] = await db.select({ id: schema.patients.id })
-        .from(schema.patients)
-        .where(eq(schema.patients.phone, normalizedPhone))
-        .limit(1);
+    for (const apt of appointmentsWithPhones) {
+      const conversation = conversationMap.get(apt.normalizedPhone);
+      
+      if (!conversation) {
+        console.log(`[appointment-confirmation] No conversation found for ${apt.normalizedPhone}, skipping`);
+        continue;
+      }
 
       const firstName = apt.paciente?.split(' ')[0] || 'Paciente';
       const text = `Oi ${firstName}! 😊\n\nEstamos passando pra confirmar sua consulta de amanhã:\n\n` +
@@ -86,9 +122,10 @@ export async function processAppointmentConfirmation(job: Job<ConfirmationJobDat
 
       // Send interactive buttons
       await messageSendQueue.add('send', {
-        patientPhone: normalizedPhone,
+        conversationId: conversation.id,
+        patientPhone: apt.normalizedPhone,
         text: '',
-        instanceName: 'uazapi',
+        instanceName: conversation.instanceName,
         interactive: {
           type: 'buttons' as const,
           text,

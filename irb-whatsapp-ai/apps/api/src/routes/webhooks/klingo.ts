@@ -7,6 +7,7 @@ import { eq, and, gte, ne } from 'drizzle-orm';
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
@@ -21,6 +22,16 @@ interface KlingoWebhookBody {
   dados?: Record<string, unknown>;
 }
 
+// Helper: find conversationId for a patient phone
+async function findConversationId(patientPhone: string): Promise<string> {
+  const { ConversationModel } = await import('@irb/database');
+  const conv = await ConversationModel.findOne({
+    patientPhone,
+    status: { $ne: 'closed' },
+  }).sort({ lastMessageAt: -1 });
+  return conv ? conv._id.toString() : '';
+}
+
 export async function klingoWebhookRoutes(app: FastifyInstance) {
   // Health check for Klingo to verify webhook
   app.get('/klingo', async () => {
@@ -29,9 +40,12 @@ export async function klingoWebhookRoutes(app: FastifyInstance) {
 
   // Main webhook endpoint
   app.post<{ Body: KlingoWebhookBody }>('/klingo', async (request, reply) => {
-    // Validate token
+    // Validate token — reject if token is not configured (security)
     const token = request.headers['x-app-token'] as string;
-    if (KLINGO_APP_TOKEN && token !== KLINGO_APP_TOKEN) {
+    if (!KLINGO_APP_TOKEN) {
+      return reply.status(503).send({ error: 'Klingo webhook not configured' });
+    }
+    if (token !== KLINGO_APP_TOKEN) {
       return reply.status(401).send({ error: 'Invalid token' });
     }
 
@@ -54,7 +68,9 @@ export async function klingoWebhookRoutes(app: FastifyInstance) {
 
               if (patient) {
                 const firstName = patient.name?.split(' ')[0] || 'Paciente';
+                const convId = await findConversationId(patient.phone);
                 await messageSendQueue.add('send', {
+                  conversationId: convId,
                   patientPhone: patient.phone,
                   text: `Oi ${firstName}, informamos que sua consulta foi cancelada pelo consultório. 😔\n\nSe quiser remarcar, é só me chamar aqui! Estou à disposição. 😊`,
                   instanceName: 'uazapi',
@@ -108,7 +124,9 @@ export async function klingoWebhookRoutes(app: FastifyInstance) {
               const profissional = dados?.profissional as string || '';
 
               const firstName = patient.name?.split(' ')[0] || 'Paciente';
+              const convId = await findConversationId(patient.phone);
               await messageSendQueue.add('send', {
+                conversationId: convId,
                 patientPhone: patient.phone,
                 text: `Oi ${firstName}! Sua consulta foi remarcada. 📅\n\n` +
                   `📋 ${profissional}\n` +
@@ -132,7 +150,9 @@ export async function klingoWebhookRoutes(app: FastifyInstance) {
 
             if (patient) {
               const firstName = patient.name?.split(' ')[0] || 'Paciente';
+              const convId = await findConversationId(patient.phone);
               await messageSendQueue.add('send', {
+                conversationId: convId,
                 patientPhone: patient.phone,
                 text: `${firstName}, sua vez chegou! 🎉 Pode se dirigir ao consultório. Te esperamos! 😊`,
                 instanceName: 'uazapi',

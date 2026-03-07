@@ -6,6 +6,7 @@ import { eq, and, sql } from 'drizzle-orm';
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  password: process.env.REDIS_PASSWORD || undefined,
 };
 
 const paymentNotificationQueue = new Queue(QUEUE_NAMES.PAYMENT_NOTIFICATION, { connection: redisConnection });
