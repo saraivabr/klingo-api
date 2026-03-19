@@ -2,7 +2,7 @@ import { Job, Queue } from 'bullmq';
 import { normalizePhone } from '@irb/shared/utils';
 import { db, schema, ConversationModel, acquireLock, releaseLock, checkRateLimit, setSession, getSession, publishEvent, redis } from '@irb/database';
 import { QUEUE_NAMES } from '@irb/shared/constants';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { transcribeAudio } from '@irb/ai';
 
 // === Klingo External API (patient identification by phone) ===
@@ -80,6 +80,51 @@ function mapMessageType(messageType: string): 'text' | 'image' | 'audio' | 'docu
       return 'document';
     default: return 'text'; // 'conversation', 'extendedTextMessage', etc.
   }
+}
+
+// --- Campaign detection for lead attribution ---
+async function detectCampaign(messageText: string): Promise<{
+  campaign: typeof schema.campaigns.$inferSelect | null;
+  source: string;
+}> {
+  if (!messageText) return { campaign: null, source: 'whatsapp_organic' };
+
+  // Try to match campaign codes (uppercase alphanumeric, 3-10 chars, e.g. ORT001, META001, SITE001)
+  const codeMatch = messageText.match(/\b([A-Z]{2,5}\d{2,5})\b/);
+
+  if (codeMatch) {
+    const code = codeMatch[1];
+    try {
+      const [campaign] = await db.select().from(schema.campaigns)
+        .where(and(
+          eq(schema.campaigns.code, code),
+          eq(schema.campaigns.status, 'active')
+        ));
+
+      if (campaign) {
+        return { campaign, source: campaign.channel || 'campaign' };
+      }
+    } catch (err) {
+      console.warn(`[intake] Campaign lookup failed for code ${code}:`, (err as Error).message);
+    }
+  }
+
+  // Also check for common patterns in the message text
+  const textLower = messageText.toLowerCase();
+  if (textLower.includes('vi no google') || textLower.includes('anúncio google')) {
+    return { campaign: null, source: 'google_ads' };
+  }
+  if (textLower.includes('vi no instagram') || textLower.includes('vi no facebook')) {
+    return { campaign: null, source: 'meta_ads' };
+  }
+  if (textLower.includes('site') || textLower.includes('vi no site')) {
+    return { campaign: null, source: 'site' };
+  }
+  if (textLower.includes('indicação') || textLower.includes('indicacao')) {
+    return { campaign: null, source: 'indicacao' };
+  }
+
+  return { campaign: null, source: 'whatsapp_organic' };
 }
 
 export async function processMessageIntake(job: Job<IntakeJobData>) {
@@ -424,17 +469,53 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
       .where(eq(schema.patients.phone, normalizedPhone))
       .limit(1);
 
+    let isNewPatient = false;
+    const { campaign, source } = await detectCampaign(text);
+
     if (!patient) {
+      isNewPatient = true;
       [patient] = await db.insert(schema.patients).values({
         phone: normalizedPhone,
         name: pushName,
-        source: 'whatsapp_organic',
+        source,
+        utmSource: campaign?.channel || null,
+        utmMedium: campaign?.medium || null,
+        utmCampaign: campaign?.name || null,
+        campaignId: campaign?.id || null,
       }).returning();
     } else if (pushName && !patient.name) {
       await db.update(schema.patients)
         .set({ name: pushName, updatedAt: new Date() })
         .where(eq(schema.patients.id, patient.id));
       patient.name = pushName;
+    }
+
+    // Create lead for new patients (non-blocking)
+    if (isNewPatient) {
+      try {
+        const [defaultStage] = await db.select().from(schema.pipelineStages)
+          .where(eq(schema.pipelineStages.isDefault, true));
+
+        if (defaultStage) {
+          await db.insert(schema.leads).values({
+            patientId: patient.id,
+            campaignId: campaign?.id || null,
+            stageId: defaultStage.id,
+            name: pushName || normalizedPhone,
+            phone: normalizedPhone,
+            source,
+            utmSource: campaign?.channel || null,
+            utmMedium: campaign?.medium || null,
+            utmCampaign: campaign?.name || null,
+            firstMessage: text?.substring(0, 500) || null,
+            status: 'open',
+          });
+          console.log(`[intake] Lead created for new patient ${normalizedPhone} (source: ${source}${campaign ? `, campaign: ${campaign.code}` : ''})`);
+        }
+      } catch (err) {
+        // Never break the main flow for lead creation failures
+        console.warn(`[intake] Lead creation failed for ${normalizedPhone}:`, (err as Error).message);
+      }
     }
 
     // 3.5. Try to identify patient in Klingo by phone (non-blocking)
