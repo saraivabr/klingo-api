@@ -12,7 +12,7 @@ interface BookingData {
   expiresAt: string;
   doctors: { id: string; name: string; crm: string }[];
   service: { id: string; name: string; priceCents: number | null; durationMinutes: number | null } | null;
-  slots: { date: string; time: string; dateTime: string }[];
+  slots: { date: string; time: string; dateTime: string; source?: 'klingo' | 'fallback'; klingoSlotId?: string | number }[];
 }
 
 type Step = 'loading' | 'slots' | 'form' | 'confirming' | 'done' | 'expired' | 'error';
@@ -29,6 +29,8 @@ export default function App() {
   const [step, setStep] = useState<Step>('loading');
   const [data, setData] = useState<BookingData | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [selectedSlotSource, setSelectedSlotSource] = useState<'klingo' | 'fallback' | undefined>(undefined);
+  const [selectedKlingoSlotId, setSelectedKlingoSlotId] = useState<string | number | undefined>(undefined);
   const [selectedDoctor, setSelectedDoctor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const token = getTokenFromUrl();
@@ -64,12 +66,14 @@ export default function App() {
       });
   }, [token]);
 
-  const handleSlotSelect = (dateTime: string) => {
-    setSelectedSlot(dateTime);
+  const handleSlotSelect = (slot: { dateTime: string; source?: 'klingo' | 'fallback'; klingoSlotId?: number }) => {
+    setSelectedSlot(slot.dateTime);
+    setSelectedSlotSource(slot.source);
+    setSelectedKlingoSlotId(slot.klingoSlotId);
     setStep('form');
   };
 
-  const handleConfirm = async (patientName: string, cpf: string, birthDate: string, email?: string) => {
+  const handleConfirm = async (patientName: string, cpf: string, birthDate: string, sexo: 'M' | 'F', email?: string) => {
     if (!token || !selectedSlot) return;
 
     setStep('confirming');
@@ -81,9 +85,12 @@ export default function App() {
           patientName,
           cpf,
           birthDate,
+          sexo,
           email: email || undefined,
           doctorId: selectedDoctor || undefined,
           slotDateTime: selectedSlot,
+          slotSource: selectedSlotSource,
+          klingoSlotId: selectedKlingoSlotId,
         }),
       });
 
@@ -102,6 +109,8 @@ export default function App() {
   const handleBack = () => {
     setStep('slots');
     setSelectedSlot(null);
+    setSelectedSlotSource(undefined);
+    setSelectedKlingoSlotId(undefined);
     setError(null);
   };
 

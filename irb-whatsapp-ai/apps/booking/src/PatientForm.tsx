@@ -8,7 +8,7 @@ interface Props {
   doctors: { id: string; name: string; crm: string }[];
   selectedDoctor: string | null;
   onSelectDoctor: (id: string) => void;
-  onConfirm: (name: string, cpf: string, birthDate: string, email?: string) => void;
+  onConfirm: (name: string, cpf: string, birthDate: string, sexo: 'M' | 'F', email?: string) => void;
   onBack: () => void;
   error: string | null;
   service: { name: string; priceCents: number | null } | null;
@@ -19,7 +19,7 @@ function formatSlotDisplay(iso: string): string {
   const weekday = d.toLocaleDateString('pt-BR', { weekday: 'long' });
   const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  return `${weekday}, ${date} às ${time}`;
+  return `${weekday}, ${date} as ${time}`;
 }
 
 function formatCpf(value: string): string {
@@ -62,45 +62,50 @@ export default function PatientForm({
   const [cpf, setCpf] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [email, setEmail] = useState('');
+  const [sexo, setSexo] = useState<'M' | 'F' | ''>('');
   const [commitment, setCommitment] = useState(false);
 
   const canSubmit = name.trim() &&
     isValidCpf(cpf) &&
     isValidBirthDate(birthDate) &&
+    sexo !== '' &&
     commitment &&
     (doctors.length <= 1 || !!selectedDoctor);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onConfirm(name.trim(), cpf.replace(/\D/g, ''), birthDate, email.trim() || undefined);
+    onConfirm(name.trim(), cpf.replace(/\D/g, ''), birthDate, sexo as 'M' | 'F', email.trim() || undefined);
   };
 
   return (
     <div className="min-h-screen bg-irb-bg">
       {/* Header */}
-      <div className="bg-irb-primary text-white px-5 py-5 rounded-b-3xl">
+      <div className="bg-gradient-to-br from-irb-primary to-irb-dark text-white px-5 py-5 rounded-b-3xl shadow-lg">
         <div className="max-w-lg mx-auto">
-          <button onClick={onBack} className="text-white/80 text-sm mb-2 flex items-center gap-1">
-            ← Voltar
-          </button>
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={onBack} className="text-irb-gold-light text-sm flex items-center gap-1">
+              &#8592; Voltar
+            </button>
+            <img src="/agendar/logo-irb.svg" alt="IRB" className="h-10 w-10" />
+          </div>
           <h1 className="text-lg font-bold">{specialty}</h1>
-          <p className="text-sm mt-1 opacity-90 capitalize">{formatSlotDisplay(selectedTime)}</p>
+          <p className="text-sm mt-1 text-white/80 capitalize">{formatSlotDisplay(selectedTime)}</p>
           {service?.priceCents && (
-            <p className="text-sm mt-1 opacity-80">R$ {(service.priceCents / 100).toFixed(2)}</p>
+            <p className="text-sm mt-1 text-irb-gold-light">R$ {(service.priceCents / 100).toFixed(2)}</p>
           )}
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-lg mx-auto px-5 py-6 space-y-5">
-        <p className="text-sm text-gray-600 bg-blue-50 px-4 py-3 rounded-xl">
-          Preencha seus dados para agilizar seu atendimento na recepção
+        <p className="text-sm text-irb-primary bg-irb-accent/30 px-4 py-3 rounded-xl">
+          Preencha seus dados para agilizar seu atendimento na recepcao
         </p>
 
         {/* Doctor selection */}
         {doctors.length > 1 && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Médico(a)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Medico(a)</label>
             <div className="space-y-2">
               {doctors.map((doc) => (
                 <button
@@ -109,12 +114,12 @@ export default function PatientForm({
                   onClick={() => onSelectDoctor(doc.id)}
                   className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
                     selectedDoctor === doc.id
-                      ? 'border-irb-primary bg-irb-bg'
+                      ? 'border-irb-gold bg-irb-accent/20'
                       : 'border-gray-200 bg-white'
                   }`}
                 >
-                  <p className="font-medium text-sm">{doc.name}</p>
-                  <p className="text-xs text-gray-500">CRM {doc.crm}</p>
+                  <p className="font-medium text-sm text-irb-primary">{doc.name}</p>
+                  {doc.crm && <p className="text-xs text-gray-500">{doc.crm}</p>}
                 </button>
               ))}
             </div>
@@ -132,7 +137,7 @@ export default function PatientForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-primary focus:outline-none text-sm"
+            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
             placeholder="Digite seu nome"
           />
         </div>
@@ -149,7 +154,7 @@ export default function PatientForm({
             value={cpf}
             onChange={(e) => setCpf(formatCpf(e.target.value))}
             required
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-primary focus:outline-none text-sm"
+            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
             placeholder="000.000.000-00"
           />
         </div>
@@ -166,9 +171,38 @@ export default function PatientForm({
             value={birthDate}
             onChange={(e) => setBirthDate(formatBirthDate(e.target.value))}
             required
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-primary focus:outline-none text-sm"
+            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
             placeholder="DD/MM/AAAA"
           />
+        </div>
+
+        {/* Sexo */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Sexo</label>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setSexo('M')}
+              className={`flex-1 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
+                sexo === 'M'
+                  ? 'border-irb-gold bg-irb-accent/20 text-irb-primary'
+                  : 'border-gray-200 bg-white text-gray-600'
+              }`}
+            >
+              Masculino
+            </button>
+            <button
+              type="button"
+              onClick={() => setSexo('F')}
+              className={`flex-1 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${
+                sexo === 'F'
+                  ? 'border-irb-gold bg-irb-accent/20 text-irb-primary'
+                  : 'border-gray-200 bg-white text-gray-600'
+              }`}
+            >
+              Feminino
+            </button>
+          </div>
         </div>
 
         {/* Phone (read-only) */}
@@ -194,7 +228,7 @@ export default function PatientForm({
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-primary focus:outline-none text-sm"
+            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
             placeholder="seu@email.com"
           />
         </div>
@@ -205,10 +239,10 @@ export default function PatientForm({
             type="checkbox"
             checked={commitment}
             onChange={(e) => setCommitment(e.target.checked)}
-            className="mt-1 w-4 h-4 rounded border-gray-300 text-irb-primary focus:ring-irb-primary"
+            className="mt-1 w-4 h-4 rounded border-gray-300 text-irb-primary focus:ring-irb-gold"
           />
           <span className="text-sm text-gray-600 leading-snug">
-            Me comprometo a comparecer na consulta agendada. Caso não consiga, entrarei em contato para remarcar ou cancelar.
+            Me comprometo a comparecer na consulta agendada. Caso nao consiga, entrarei em contato para remarcar ou cancelar.
           </span>
         </label>
 
@@ -223,7 +257,7 @@ export default function PatientForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="w-full py-4 bg-irb-primary text-white font-semibold rounded-xl hover:bg-irb-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          className="w-full py-4 bg-irb-gold text-irb-primary font-bold rounded-xl hover:bg-irb-gold-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm shadow-md"
         >
           Confirmar agendamento
         </button>

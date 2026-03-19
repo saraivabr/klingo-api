@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>O que fizemos: Agendamento WhatsApp + Klingo — 12 de Março 2026</title>
+<style>
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #1c2129;
+    --border: #30363d;
+    --border-light: #3d444d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent-red: #f85149;
+    --accent-red-dim: #f8514920;
+    --accent-orange: #d29922;
+    --accent-orange-dim: #d2992220;
+    --accent-blue: #58a6ff;
+    --accent-blue-dim: #58a6ff15;
+    --accent-green: #3fb950;
+    --accent-green-dim: #3fb95020;
+    --accent-purple: #bc8cff;
+    --accent-purple-dim: #bc8cff15;
+    --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    --shadow: 0 3px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.7;
+    font-size: 15px;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar Navigation ── */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 280px;
+    height: 100vh;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-brand {
+    padding: 0 24px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
+  .sidebar-brand h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent-blue);
+    margin-bottom: 4px;
+  }
+
+  .sidebar-brand .subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+  }
+
+  .sidebar nav { flex: 1; padding: 0 12px; }
+
+  .sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    margin-bottom: 2px;
+  }
+
+  .sidebar nav a:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+
+  .sidebar nav a .nav-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .sidebar nav a.active {
+    background: var(--accent-blue-dim);
+    color: var(--accent-blue);
+  }
+
+  .sidebar-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .sidebar-footer .stat-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .sidebar-footer .stat-value { color: var(--text-secondary); font-weight: 600; }
+
+  /* ── Main Content ── */
+  .main {
+    margin-left: 280px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ── Top Header ── */
+  .top-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 48px;
+    backdrop-filter: blur(12px);
+    background: rgba(22, 27, 34, 0.92);
+  }
+
+  .top-header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
+  .top-header .meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    display: flex;
+    gap: 20px;
+  }
+
+  .top-header .meta span::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .meta .meta-status::before { background: var(--accent-green); }
+  .meta .meta-date::before { background: var(--accent-blue); }
+  .meta .meta-scope::before { background: var(--accent-orange); }
+
+  .content { padding: 40px 48px 80px; max-width: 1100px; }
+
+  /* ── Summary Cards ── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+
+  .summary-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .summary-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+  }
+
+  .summary-card.red::before { background: var(--accent-red); }
+  .summary-card.orange::before { background: var(--accent-orange); }
+  .summary-card.green::before { background: var(--accent-green); }
+  .summary-card.blue::before { background: var(--accent-blue); }
+
+  .summary-card .card-value {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .summary-card.red .card-value { color: var(--accent-red); }
+  .summary-card.orange .card-value { color: var(--accent-orange); }
+  .summary-card.green .card-value { color: var(--accent-green); }
+  .summary-card.blue .card-value { color: var(--accent-blue); }
+
+  .summary-card .card-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Executive Summary ── */
+  .exec-summary {
+    background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    margin-bottom: 48px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .exec-summary::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, var(--accent-blue), var(--accent-purple));
+  }
+
+  .exec-summary p {
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.8;
+  }
+
+  .exec-summary strong { color: var(--text-primary); }
+
+  /* ── Sections ── */
+  .section {
+    margin-bottom: 48px;
+  }
+
+  .section-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    letter-spacing: -0.3px;
+  }
+
+  .section-title .section-num {
+    background: var(--accent-blue-dim);
+    color: var(--accent-blue);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+
+  /* ── Collapsible Sections ── */
+  details {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+
+  details:hover { border-color: var(--border-light); }
+
+  details[open] { border-color: var(--accent-blue); }
+  details[open] > summary { border-bottom: 1px solid var(--border); }
+
+  summary {
+    padding: 16px 20px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    user-select: none;
+    list-style: none;
+    transition: background 0.1s;
+  }
+
+  summary::-webkit-details-marker { display: none; }
+
+  summary::before {
+    content: '▸';
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  details[open] > summary::before { transform: rotate(90deg); }
+
+  summary:hover { background: var(--bg-tertiary); }
+
+  .details-body { padding: 20px; }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  .badge-critical { background: var(--accent-red-dim); color: var(--accent-red); border: 1px solid var(--accent-red); }
+  .badge-medium { background: var(--accent-orange-dim); color: var(--accent-orange); border: 1px solid var(--accent-orange); }
+  .badge-minor { background: var(--accent-blue-dim); color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+  .badge-fixed { background: var(--accent-green-dim); color: var(--accent-green); border: 1px solid var(--accent-green); }
+
+  /* ── Bug Detail ── */
+  .bug-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+  }
+
+  .bug-title { flex: 1; }
+
+  .bug-field {
+    margin-bottom: 16px;
+  }
+
+  .bug-field-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .bug-field-value {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .bug-field-value code {
+    background: var(--bg-primary);
+    color: var(--accent-orange);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  /* ── Architecture Diagram ── */
+  .arch-diagram {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr;
+    gap: 0;
+    align-items: start;
+    margin: 24px 0;
+  }
+
+  .arch-path {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    position: relative;
+  }
+
+  .arch-path.broken {
+    border-color: var(--accent-red);
+    box-shadow: 0 0 20px var(--accent-red-dim);
+  }
+
+  .arch-path.working {
+    border-color: var(--accent-green);
+    box-shadow: 0 0 20px var(--accent-green-dim);
+  }
+
+  .arch-path-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .arch-path.broken .arch-path-title { color: var(--accent-red); }
+  .arch-path.working .arch-path-title { color: var(--accent-green); }
+
+  .arch-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+
+  .arch-step-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .arch-step-text { color: var(--text-secondary); line-height: 1.5; padding-top: 2px; }
+  .arch-step-text strong { color: var(--text-primary); }
+
+  .arch-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding-top: 40px;
+  }
+
+  .arch-file {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-purple);
+    background: var(--accent-purple-dim);
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 12px;
+  }
+
+  .arch-status-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    margin-top: 12px;
+  }
+
+  .arch-status-tag.broken-tag { background: var(--accent-red-dim); color: var(--accent-red); }
+  .arch-status-tag.working-tag { background: var(--accent-green-dim); color: var(--accent-green); }
+
+  /* ── Tables ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 16px 0;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    background: var(--bg-tertiary);
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--bg-tertiary); }
+
+  td code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-orange);
+    background: var(--bg-primary);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ── Flow Diagram ── */
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 24px 0;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    position: relative;
+    padding-bottom: 20px;
+  }
+
+  .flow-step:last-child { padding-bottom: 0; }
+
+  .flow-step::before {
+    content: '';
+    position: absolute;
+    left: 17px;
+    top: 36px;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .flow-step:last-child::before { display: none; }
+
+  .flow-step-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    border: 2px solid;
+  }
+
+  .flow-step-icon.green { background: var(--accent-green-dim); border-color: var(--accent-green); }
+  .flow-step-icon.blue { background: var(--accent-blue-dim); border-color: var(--accent-blue); }
+  .flow-step-icon.orange { background: var(--accent-orange-dim); border-color: var(--accent-orange); }
+
+  .flow-step-content {
+    padding-top: 6px;
+  }
+
+  .flow-step-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+
+  .flow-step-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ── Test Iterations ── */
+  .test-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    position: relative;
+  }
+
+  .test-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .test-card-title {
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .test-card-result {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 4px 12px;
+    border-radius: 20px;
+  }
+
+  .result-fail { background: var(--accent-red-dim); color: var(--accent-red); }
+  .result-partial { background: var(--accent-orange-dim); color: var(--accent-orange); }
+  .result-pass { background: var(--accent-green-dim); color: var(--accent-green); }
+
+  .test-interaction {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  .test-interaction:last-child { margin-bottom: 0; }
+
+  .test-role {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    width: 70px;
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+
+  .test-role.patient { color: var(--accent-blue); }
+  .test-role.system { color: var(--accent-purple); }
+
+  .test-msg {
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .test-msg .pass { color: var(--accent-green); font-weight: 600; }
+  .test-msg .fail { color: var(--accent-red); font-weight: 600; }
+
+  .test-conclusion {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* ── Timeline ── */
+  .timeline {
+    position: relative;
+    padding: 24px 0;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 82px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+
+  .timeline-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+
+  .timeline-time {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    width: 60px;
+    flex-shrink: 0;
+    text-align: right;
+    padding-top: 2px;
+  }
+
+  .timeline-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    margin-top: 4px;
+    border: 3px solid;
+  }
+
+  .timeline-dot.blue { background: var(--accent-blue-dim); border-color: var(--accent-blue); }
+  .timeline-dot.orange { background: var(--accent-orange-dim); border-color: var(--accent-orange); }
+  .timeline-dot.green { background: var(--accent-green-dim); border-color: var(--accent-green); }
+  .timeline-dot.red { background: var(--accent-red-dim); border-color: var(--accent-red); }
+
+  .timeline-content {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .timeline-content strong { color: var(--text-primary); }
+
+  /* ── Code Block ── */
+  .code-block {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.8;
+    overflow-x: auto;
+    color: var(--text-secondary);
+    margin: 16px 0;
+  }
+
+  .code-block .key { color: var(--accent-blue); }
+  .code-block .val { color: var(--accent-green); }
+  .code-block .comment { color: var(--text-muted); font-style: italic; }
+
+  /* ── Pendencias ── */
+  .pending-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-orange);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+  }
+
+  .pending-item h4 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--accent-orange);
+  }
+
+  .pending-item p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* ── Modified Files ── */
+  .file-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 10px;
+  }
+
+  .file-path {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent-purple);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .file-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .file-desc li {
+    margin-bottom: 4px;
+    margin-left: 16px;
+  }
+
+  /* ── Footer ── */
+  .report-footer {
+    margin-top: 64px;
+    padding: 24px 0;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.8;
+  }
+
+  .report-footer .brand {
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { display: block; }
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .top-header { position: static; background: white; color: #111; border-bottom: 2px solid #111; }
+    .content { padding: 20px; }
+    details { break-inside: avoid; }
+    details[open] > .details-body { break-inside: avoid; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .arch-diagram { grid-template-columns: 1fr; }
+    .arch-divider { display: none; }
+    * { color: #111 !important; background: white !important; border-color: #ccc !important; box-shadow: none !important; }
+    .badge, .arch-status-tag, .test-card-result { border: 1px solid #999 !important; }
+  }
+
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .arch-diagram { grid-template-columns: 1fr; gap: 16px; }
+    .arch-divider { display: none; }
+    .content { padding: 24px 20px; }
+    .top-header { padding: 16px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════ SIDEBAR ════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h2>IRB Prime Care</h2>
+    <div class="subtitle">O que aconteceu &mdash; Resumo do dia</div>
+  </div>
+  <nav>
+    <a href="#summary"><span class="nav-icon">&#9670;</span> Resumo Geral</a>
+    <a href="#architecture"><span class="nav-icon">&#9633;</span> Como funciona</a>
+    <a href="#bugs"><span class="nav-icon">&#9888;</span> Problemas encontrados</a>
+    <a href="#production"><span class="nav-icon">&#9211;</span> Situacao em producao</a>
+    <a href="#fixes"><span class="nav-icon">&#10003;</span> O que a gente mudou</a>
+    <a href="#e2e"><span class="nav-icon">&#9655;</span> Testes reais</a>
+    <a href="#pending"><span class="nav-icon">&#9888;</span> O que falta</a>
+    <a href="#timeline"><span class="nav-icon">&#8634;</span> Linha do tempo</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="stat-row"><span>Problemas achados</span><span class="stat-value">9</span></div>
+    <div class="stat-row"><span>Problemas resolvidos</span><span class="stat-value">9</span></div>
+    <div class="stat-row"><span>Deploys feitos</span><span class="stat-value">3</span></div>
+    <div class="stat-row"><span>Testes de ponta a ponta</span><span class="stat-value">4</span></div>
+    <div class="stat-row"><span>Tempo total</span><span class="stat-value">23 min</span></div>
+  </div>
+</aside>
+
+<!-- ════════════════════════════════════ MAIN ════════════════════════════════════ -->
+<div class="main">
+
+  <header class="top-header">
+    <h1>Agendamento WhatsApp &rarr; Klingo: o que achamos e corrigimos</h1>
+    <div class="meta">
+      <span class="meta-status">Pronto &mdash; 9 de 9 problemas resolvidos</span>
+      <span class="meta-date">12 de Marco de 2026</span>
+      <span class="meta-scope">Sistema de agendamento (worker + IA)</span>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- ── Summary Cards ── -->
+    <div class="summary-grid">
+      <div class="summary-card red">
+        <div class="card-value">4</div>
+        <div class="card-label">Problemas Graves</div>
+      </div>
+      <div class="summary-card orange">
+        <div class="card-value">3</div>
+        <div class="card-label">Problemas Medios</div>
+      </div>
+      <div class="summary-card green">
+        <div class="card-value">9</div>
+        <div class="card-label">Todos Resolvidos</div>
+      </div>
+      <div class="summary-card blue">
+        <div class="card-value">4</div>
+        <div class="card-label">Agendamentos Perdidos</div>
+      </div>
+    </div>
+
+    <!-- ════════════════════ EXECUTIVE SUMMARY ════════════════════ -->
+    <div id="summary" class="exec-summary">
+      <p>O problema principal era: o paciente agendava pelo WhatsApp, recebia confirmacao, mas <strong>o agendamento NAO aparecia no Klingo</strong>. Ou seja, a clinica nao via nada. Encontramos <strong>9 problemas</strong> no total &mdash; 6 na comunicacao com o Klingo e 3 na conversa da Julia (IA). Corrigimos todos e testamos em producao ate funcionar de ponta a ponta.</p>
+    </div>
+
+    <!-- ════════════════════ SECTION 1: ARCHITECTURE ════════════════════ -->
+    <section id="architecture" class="section">
+      <h2 class="section-title">
+        <span class="section-num">01</span>
+        Como funciona o agendamento
+      </h2>
+
+      <p style="color: var(--text-secondary); margin-bottom: 24px;">
+        Existem <strong>dois jeitos</strong> de agendar. O <strong>Caminho A</strong> (a Julia agenda direto pela conversa) estava quebrado. O <strong>Caminho B</strong> (paciente clica num link e preenche formulario) ja funcionava.
+      </p>
+
+      <div class="arch-diagram">
+        <!-- Caminho A -->
+        <div class="arch-path broken">
+          <div class="arch-path-title">&#10006; Caminho A: Julia agenda pela conversa</div>
+          <div class="arch-file">ai-pipeline.ts &mdash; book_appointment</div>
+          <div class="arch-step">
+            <div class="arch-step-num">1</div>
+            <div class="arch-step-text">Paciente manda mensagem no WhatsApp</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">2</div>
+            <div class="arch-step-text">Julia (IA) tenta agendar direto</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">3</div>
+            <div class="arch-step-text">Salvava o agendamento <strong>no nosso banco PRIMEIRO</strong></div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">4</div>
+            <div class="arch-step-text">Depois tentava mandar pro Klingo</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">5</div>
+            <div class="arch-step-text"><strong>Falhava sem avisar ninguem</strong></div>
+          </div>
+          <div class="arch-status-tag broken-tag">Estava quebrado</div>
+        </div>
+
+        <!-- Divider -->
+        <div class="arch-divider">VS</div>
+
+        <!-- Caminho B -->
+        <div class="arch-path working">
+          <div class="arch-path-title">&#10004; Caminho B: Link de agendamento</div>
+          <div class="arch-file">booking.ts &mdash; formulario web</div>
+          <div class="arch-step">
+            <div class="arch-step-num">1</div>
+            <div class="arch-step-text">Paciente clica no link que a Julia manda</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">2</div>
+            <div class="arch-step-text">Preenche CPF, data de nascimento, etc.</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">3</div>
+            <div class="arch-step-text">Reserva no <strong>Klingo ANTES</strong> de salvar aqui</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">4</div>
+            <div class="arch-step-text">So salva no nosso banco depois que o Klingo confirmou</div>
+          </div>
+          <div class="arch-step">
+            <div class="arch-step-num">5</div>
+            <div class="arch-step-text">Se der erro: <strong>desfaz tudo e avisa o time</strong></div>
+          </div>
+          <div class="arch-status-tag working-tag">Ja funcionava</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════ SECTION 2: BUGS ════════════════════ -->
+    <section id="bugs" class="section">
+      <h2 class="section-title">
+        <span class="section-num">02</span>
+        Os 9 problemas que encontramos
+      </h2>
+
+      <!-- BUG 1 -->
+      <details open>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-critical">Grave</span>
+            <span class="bug-title">1. Paciente era cadastrado no Klingo sem CPF</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">A gente tentava cadastrar o paciente no Klingo so com nome e telefone. <strong>Sem CPF, sem data de nascimento, sem nada.</strong> O Klingo rejeitava, e o agendamento inteiro parava ali.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Por que isso era grave</div>
+            <div class="bug-field-value">Sem o cadastro do paciente no Klingo, nao tem como reservar horario. O sistema simplesmente pulava essa etapa <strong>sem avisar ninguem</strong>.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Paramos de tentar cadastrar na hora. Agora a gente busca o paciente pelo telefone no Klingo. Se nao encontrar, avisa o time pra cadastrar manualmente.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Detalhe tecnico</div>
+            <div class="bug-field-value">Trocamos <code>/api/paciente/cadastrar</code> por <code>identifyPatientByPhone()</code> via <code>KlingoExternalWorkerClient</code>. Arquivo: <code>ai-pipeline.ts</code>, linhas 648-660.</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 2 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-critical">Grave</span>
+            <span class="bug-title">2. Horario formatado errado &mdash; nunca achava o slot</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">O sistema comparava "09:00" com "9:00" e nao achava correspondencia. <strong>Resultado: nunca conseguia reservar o horario no Klingo</strong>, mesmo quando o paciente e o horario estavam certos.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Por que acontecia</div>
+            <div class="bug-field-value">Dentro do Docker, a formatacao de hora funciona diferente do que no computador normal. "9:00" virava "09:00" ou vice-versa dependendo do servidor.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Paramos de depender do formato do servidor. Agora a gente monta o horario na mao: sempre "09:00", "14:30", etc., com zero a esquerda garantido.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Detalhe tecnico</div>
+            <div class="bug-field-value">Substituimos <code>toLocaleTimeString('pt-BR')</code> por <code>String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0')</code>. Arquivo: <code>ai-pipeline.ts</code>, linha 706.</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 3 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-critical">Grave</span>
+            <span class="bug-title">3. Salvava aqui ANTES de confirmar no Klingo</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">O agendamento era salvo no nosso banco <strong>antes</strong> de tentar reservar no Klingo. Se o Klingo desse erro, ficava um agendamento "fantasma" &mdash; existia aqui mas nao la.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value"><strong>Invertemos a ordem.</strong> Agora reserva no Klingo PRIMEIRO. So salva no nosso banco se o Klingo confirmar. Se nao confirmar, avisa o time e tenta de novo automaticamente.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Detalhe tecnico</div>
+            <div class="bug-field-value">Movemos <code>db.insert(appointments)</code> pra depois da chamada <code>reserveSlot()</code>. Arquivo: <code>ai-pipeline.ts</code>, linha 613.</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 4 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-medium">Medio</span>
+            <span class="bug-title">4. Comunicacao com Klingo feita "na mao"</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">A parte que conversa com o Klingo era feita de um jeito "artesanal" (chamada HTTP manual), sem reaproveitamento, sem tratamento de erro padrao. O Caminho B ja tinha um modulo pronto pra isso, mas o Caminho A nao usava.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Trocamos tudo pra usar o <strong>mesmo modulo</strong> que o Caminho B ja usava. Agora os dois caminhos falam com o Klingo do mesmo jeito.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Detalhe tecnico</div>
+            <div class="bug-field-value">Substituimos todos os <code>fetch()</code> manuais pelo <code>KlingoExternalWorkerClient</code>. Arquivo: <code>ai-pipeline.ts</code>, linhas 628-754.</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 5 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-medium">Medio</span>
+            <span class="bug-title">5. Ninguem era avisado quando dava erro</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">Quando o Caminho B (link) falhava, o time recebia mensagem no WhatsApp avisando. Quando o Caminho A (Julia) falhava, <strong>ninguem ficava sabendo</strong>. O agendamento simplesmente sumia.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Agora, se der qualquer erro no agendamento pela Julia, o time recebe uma <strong>mensagem automatica no WhatsApp</strong> com os detalhes. Alem disso, o sistema tenta de novo sozinho ate 3 vezes (espera 1min, 2min, depois 4min).</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Detalhe tecnico</div>
+            <div class="bug-field-value">Notificacao via WhatsApp para <code>TEAM_NOTIFY_PHONE</code> + fila <code>klingo-sync</code> com 3 retries e backoff exponencial.</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 6 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-minor">Menor</span>
+            <span class="bug-title">6. Variavel duplicada de configuracao</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">Tinha uma variavel (<code>KLINGO_APP_TOKEN_BOOK</code>) que era so um apelido desnecessario. Nao causava erro, mas confundia quem lia o codigo.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Mantivemos a variavel, mas agora ela e usada de forma consistente junto com o modulo do Klingo.</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 7 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-critical">Grave</span>
+            <span class="bug-title">7. "Filtro de seguranca" bloqueava quem queria agendar</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">Temos um filtro que identifica quando o paciente manda mensagem sobre assuntos como "financeiro", "agenda", etc. O problema: quando alguem dizia <strong>"quero agendar cardiologia"</strong>, o filtro pegava a palavra "agenda" e bloqueava a mensagem. A Julia (IA) nunca chegava a ver a mensagem.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Na pratica</div>
+            <div class="bug-field-value">Paciente dizia "quero agendar cardiologia" e recebia botoes genericos tipo "Qual e seu objetivo?" ao inves de ser direcionado pra agendar.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value"><strong>Se o paciente menciona uma especialidade</strong> (cardiologia, neurologia, etc.), o filtro nao intercepta mais. Deixa a Julia cuidar.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Descoberto no</div>
+            <div class="bug-field-value">Teste 2 (depois do primeiro deploy)</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 8 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-medium">Medio</span>
+            <span class="bug-title">8. Regra de experiencia jogava fora a resposta da Julia</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">A Julia gerava o link de agendamento certinho, mas <strong>outra parte do codigo substituia a resposta inteira</strong> por botoes de triagem ("Me conta, o que ta te trazendo aqui hoje?"). O link sumia.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Na pratica</div>
+            <div class="bug-field-value">Paciente pedia link, Julia criava o link no banco de dados, mas o paciente recebia "o que voce precisa?" com botoes. O link nunca era enviado.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Agora, se a Julia ja gerou um link ou ja fez agendamento, essa regra <strong>nao mexe na resposta</strong>. So entra quando a Julia nao tomou nenhuma acao.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Descoberto no</div>
+            <div class="bug-field-value">Teste 1 (primeiro teste de producao)</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- BUG 9 -->
+      <details>
+        <summary>
+          <div class="bug-header">
+            <span class="badge badge-medium">Medio</span>
+            <span class="bug-title">9. Julia era obrigada a fazer triagem sempre</span>
+            <span class="badge badge-fixed">Resolvido</span>
+          </div>
+        </summary>
+        <div class="details-body">
+          <div class="bug-field">
+            <div class="bug-field-label">O que acontecia</div>
+            <div class="bug-field-value">As instrucoes da Julia diziam "NUNCA pule a triagem". Entao mesmo quando o paciente dizia <strong>"quero agendar cardiologia"</strong>, a Julia fazia 5+ perguntas antes de gerar o link.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Na pratica</div>
+            <div class="bug-field-value">Paciente ja sabia o que queria, mas tinha que responder "o que voce sente?", "ha quanto tempo?", etc., antes de conseguir agendar. Frustrante.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">O que fizemos</div>
+            <div class="bug-field-value">Criamos uma regra de <strong>"atalho"</strong>: se o paciente ja diz a especialidade, a Julia pula a triagem e vai direto pro agendamento. Se nao sabe a especialidade, ai sim faz triagem.</div>
+          </div>
+          <div class="bug-field">
+            <div class="bug-field-label">Descoberto no</div>
+            <div class="bug-field-value">Teste 3 (terceiro deploy)</div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ════════════════════ SECTION 3: PRODUCTION AUDIT ════════════════════ -->
+    <section id="production" class="section">
+      <h2 class="section-title">
+        <span class="section-num">03</span>
+        Situacao em producao agora
+      </h2>
+
+      <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary);">Como estao os agendamentos hoje (12/03/2026)</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Situacao</th>
+              <th>Qtd</th>
+              <th>O que significa</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-fixed" style="font-size: 11px;">OK</span> &nbsp;Sincronizados</td>
+              <td style="font-weight: 700; color: var(--accent-green);">11</td>
+              <td>Tudo certo &mdash; existem aqui E no Klingo. Foram criados pelo Caminho B (link).</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-medium" style="font-size: 11px;">Perdidos</span> &nbsp;Nao foram pro Klingo</td>
+              <td style="font-weight: 700; color: var(--accent-orange);">3</td>
+              <td>2 de hoje (Brancos + Renata) + 1 antigo de 2023 (Marcela Matsuo)</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-critical" style="font-size: 11px;">Erro</span> &nbsp;Falhou</td>
+              <td style="font-weight: 700; color: var(--accent-red);">1</td>
+              <td>Saraiva &mdash; o Klingo nao reconheceu o CPF <code>38054952856</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="font-size: 16px; font-weight: 600; margin: 32px 0 16px; color: var(--text-primary);">Detalhes dos agendamentos perdidos</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Paciente</th>
+              <th>Telefone</th>
+              <th>Data da Consulta</th>
+              <th>Situacao</th>
+              <th>No Klingo?</th>
+              <th>Problema</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-weight: 600; color: var(--text-primary);">Brancos</td>
+              <td><code>+557197199737</code></td>
+              <td>12/03/2026 14:00</td>
+              <td><span class="badge badge-medium">aguardando</span></td>
+              <td><span class="badge badge-medium">nao</span></td>
+              <td style="color: var(--text-muted);">nenhum erro registrado</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 600; color: var(--text-primary);">Renata Assis Dos Santos</td>
+              <td><code>+5511954866404</code></td>
+              <td>12/03/2026 09:00</td>
+              <td><span class="badge badge-medium">aguardando</span></td>
+              <td><span class="badge badge-medium">nao</span></td>
+              <td style="color: var(--text-muted);">nenhum erro registrado</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 600; color: var(--text-primary);">Saraiva</td>
+              <td><code>+5511991143605</code></td>
+              <td>10/03/2026 17:00</td>
+              <td><span class="badge badge-fixed">agendado</span></td>
+              <td><span class="badge badge-critical">falhou</span></td>
+              <td>Klingo retornou "Paciente nao identificado" (CPF nao cadastrado la)</td>
+            </tr>
+            <tr>
+              <td style="font-weight: 600; color: var(--text-primary);">Marcela Matsuo</td>
+              <td><code>+5511988223189</code></td>
+              <td>05/10/2023 13:00</td>
+              <td><span class="badge badge-fixed">agendado</span></td>
+              <td><span class="badge badge-medium">nao</span></td>
+              <td style="color: var(--text-muted);">agendamento fantasma de 2023, sem medico, criado pela IA</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style="font-size: 16px; font-weight: 600; margin: 32px 0 16px; color: var(--text-primary);">Outras coisas que descobrimos nos logs</h3>
+
+      <div class="pending-item" style="border-left-color: var(--accent-red);">
+        <h4 style="color: var(--accent-red);">1. A agenda esta bloqueada no Klingo</h4>
+        <p>Quando a gente tenta puxar horarios disponiveis, o Klingo responde "Procedimento nao identificado". O Flavio Barbieri confirmou: <em>"a agenda ta bloqueada na Klingo"</em>. Isso e configuracao do lado da Klingo &mdash; nao e problema nosso.</p>
+      </div>
+
+      <div class="pending-item" style="border-left-color: var(--accent-orange);">
+        <h4>2. Sincronizacao automatica nao esta puxando nada</h4>
+        <p>O processo que roda a cada 5 minutos pra sincronizar agendamentos com o Klingo esta retornando 0 resultados. Provavelmente por causa do bloqueio da agenda mencionado acima.</p>
+      </div>
+
+      <div class="pending-item" style="border-left-color: var(--accent-green);">
+        <h4 style="color: var(--accent-green);">3. Configuracoes de acesso estao OK</h4>
+        <p>Verificamos nos dois containers (API e Worker): os tokens e URLs do Klingo estao certos. O problema nao e de configuracao nossa.</p>
+      </div>
+    </section>
+
+    <!-- ════════════════════ SECTION 4: FIXES ════════════════════ -->
+    <section id="fixes" class="section">
+      <h2 class="section-title">
+        <span class="section-num">04</span>
+        O que a gente mudou
+      </h2>
+
+      <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary);">Arquivos que foram alterados</h3>
+
+      <div class="file-card">
+        <div class="file-path">apps/worker/src/processors/ai-pipeline.ts</div>
+        <div class="file-desc">
+          <ul>
+            <li>Reescrevemos toda a parte de agendamento direto pela Julia (problemas 1-6)</li>
+            <li>Corrigimos o filtro que bloqueava quem queria agendar (problema 7)</li>
+            <li>Corrigimos a regra que jogava fora a resposta da Julia (problema 8)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="file-card">
+        <div class="file-path">apps/worker/src/processors/klingo-sync.ts</div>
+        <div class="file-desc">
+          <ul>
+            <li>Disponibilizamos o modulo de comunicacao com o Klingo pra outros arquivos usarem</li>
+            <li>Adicionamos funcoes novas: cancelar reserva, cadastrar paciente, buscar horarios</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="file-card">
+        <div class="file-path">apps/ai/src/prompts/system.ts</div>
+        <div class="file-desc">
+          <ul>
+            <li>Criamos o atalho: se paciente diz a especialidade, pula triagem e agenda direto</li>
+            <li>Mudamos a regra "NUNCA pule a triagem" pra permitir essa excecao</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 style="font-size: 16px; font-weight: 600; margin: 32px 0 16px; color: var(--text-primary);">Como funciona o agendamento agora (novo fluxo)</h3>
+
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="flow-step-icon green">1</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Busca os dados do paciente e medico no nosso banco</div>
+            <div class="flow-step-desc">Igual antes &mdash; pega nome, telefone, especialidade</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon blue">2</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Procura o paciente no Klingo pelo telefone</div>
+            <div class="flow-step-desc">Se nao achar, avisa o time e tenta de novo depois</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon blue">3</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Busca horarios disponiveis no Klingo</div>
+            <div class="flow-step-desc">Pra aquele medico, naquele dia</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon blue">4</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Encontra o horario certo (formato padronizado)</div>
+            <div class="flow-step-desc">Sem problema de "09:00" vs "9:00" &mdash; agora sempre bate</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon blue">5</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Reserva o horario no Klingo (segura por 10 minutos)</div>
+            <div class="flow-step-desc">Se nao conseguir reservar, para aqui e avisa</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon green">6</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">SO AGORA salva o agendamento no nosso banco</div>
+            <div class="flow-step-desc">Com o ID da reserva do Klingo ja incluido</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon blue">7</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Confirma a reserva e marca como sincronizado</div>
+            <div class="flow-step-desc">Pronto! Agendamento existe nos dois lados</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-step-icon orange">8</div>
+          <div class="flow-step-content">
+            <div class="flow-step-title">Se der erro em qualquer passo: avisa o time e tenta de novo</div>
+            <div class="flow-step-desc">Mensagem no WhatsApp pro time + 3 tentativas automaticas (espera 1min, 2min, 4min)</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════ SECTION 5: E2E TESTS ════════════════════ -->
+    <section id="e2e" class="section">
+      <h2 class="section-title">
+        <span class="section-num">05</span>
+        Testes que fizemos em producao
+      </h2>
+
+      <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 14px;">
+        <strong>Como testamos:</strong> Simulamos pacientes mandando mensagem pelo WhatsApp direto no servidor de producao. Usamos numeros de telefone ficticios (<code>5511999990001</code> a <code>0005</code>) pra nao mandar mensagem real pra ninguem.
+      </p>
+
+      <!-- Iteracao 1 -->
+      <div class="test-card">
+        <div class="test-card-header">
+          <div class="test-card-title">
+            <span style="color: var(--accent-blue); font-family: var(--font-mono); font-size: 12px;">01</span>
+            Primeiro teste
+            <span style="font-size: 12px; color: var(--text-muted); font-weight: 400;">Numero 5511999990001</span>
+          </div>
+          <span class="test-card-result result-fail">Falhou</span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Oi, boa tarde!" &rarr; Julia respondeu com saudacao <span class="pass">OK</span></span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Quero marcar cardiologia" &rarr; Julia mandou perguntas de triagem ao inves de agendar <span class="fail">FALHOU</span> (problema 8)</span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Tenho dor no peito, cardiologista" &rarr; Julia mencionou a doutora mas nao fez nada <span class="fail">FALHOU</span></span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Me manda o link de horarios" &rarr; Julia criou o link <span class="pass">OK</span> mas a resposta foi substituida por triagem <span class="fail">FALHOU</span> (problema 8)</span>
+        </div>
+        <div class="test-conclusion">Descobrimos que a regra de experiencia estava jogando fora a resposta da Julia</div>
+      </div>
+
+      <!-- Iteracao 2 -->
+      <div class="test-card">
+        <div class="test-card-header">
+          <div class="test-card-title">
+            <span style="color: var(--accent-blue); font-family: var(--font-mono); font-size: 12px;">02</span>
+            Segundo teste
+            <span style="font-size: 12px; color: var(--text-muted); font-weight: 400;">Depois de corrigir problema 8</span>
+          </div>
+          <span class="test-card-result result-fail">Falhou</span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Oi! Quero agendar cardiologia" &rarr; Filtro bloqueou e mandou "Qual e seu objetivo?" <span class="fail">FALHOU</span> (problema 7)</span>
+        </div>
+        <div class="test-conclusion">Descobrimos que o filtro pegava "agenda" dentro de "agendar" e bloqueava</div>
+      </div>
+
+      <!-- Iteracao 3 -->
+      <div class="test-card">
+        <div class="test-card-header">
+          <div class="test-card-title">
+            <span style="color: var(--accent-blue); font-family: var(--font-mono); font-size: 12px;">03</span>
+            Terceiro teste
+            <span style="font-size: 12px; color: var(--text-muted); font-weight: 400;">Depois de corrigir problemas 7 e 8</span>
+          </div>
+          <span class="test-card-result result-partial">Quase</span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">Paciente disse a especialidade &rarr; Filtro deixou passar <span class="pass">OK</span> mas Julia ficou fazendo triagem <span class="fail">FALHOU</span></span>
+        </div>
+        <div class="test-conclusion">Descobrimos que as instrucoes da Julia forcavam triagem obrigatoria (problema 9)</div>
+      </div>
+
+      <!-- Iteracao 4 -->
+      <div class="test-card" style="border-color: var(--accent-green); box-shadow: 0 0 20px var(--accent-green-dim);">
+        <div class="test-card-header">
+          <div class="test-card-title">
+            <span style="color: var(--accent-green); font-family: var(--font-mono); font-size: 12px;">04</span>
+            Quarto teste &mdash; FUNCIONOU!
+            <span style="font-size: 12px; color: var(--text-muted); font-weight: 400;">Depois de corrigir problemas 7, 8 e 9</span>
+          </div>
+          <span class="test-card-result result-pass">Sucesso</span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Oi, sou Lucas Teste. Preciso agendar cardiologia" &rarr; Julia mencionou Dra. Natalia Mucare <span class="pass">OK</span></span>
+        </div>
+        <div class="test-interaction">
+          <span class="test-role patient">Paciente</span>
+          <span class="test-msg">"Sim, quero agendar com ela!" &rarr; Julia gerou o link <span class="pass">OK</span> &rarr; Mandou o botao pro paciente <span class="pass">OK</span></span>
+        </div>
+        <div class="test-conclusion" style="color: var(--accent-green); font-style: normal; font-weight: 600;">Fluxo completo funcionando! Paciente consegue agendar em 2 mensagens.</div>
+      </div>
+
+      <h3 style="font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: var(--text-primary);">Prova de que funcionou</h3>
+
+      <div class="code-block">
+<span class="comment">-- Link de agendamento criado no banco de dados:</span>
+<span class="key">token</span>:           <span class="val">nmHLZNLKC2ruygMH3Ktd9</span>
+<span class="key">patient_name</span>:    <span class="val">Lucas Teste</span>
+<span class="key">patient_phone</span>:   <span class="val">+5511999990005</span>
+<span class="key">specialty</span>:       <span class="val">Cardiologia</span>
+<span class="key">status</span>:          <span class="val">pending</span>
+<span class="key">created_at</span>:      <span class="val">2026-03-12 14:40:35</span>
+      </div>
+    </section>
+
+    <!-- ════════════════════ SECTION 6: PENDING ════════════════════ -->
+    <section id="pending" class="section">
+      <h2 class="section-title">
+        <span class="section-num">06</span>
+        O que ainda falta resolver
+      </h2>
+
+      <div class="pending-item">
+        <h4>1. Agenda bloqueada no Klingo</h4>
+        <p>Quando a gente tenta puxar horarios do Klingo, ele responde com erro 403. <strong>Isso nao e problema nosso</strong> &mdash; e configuracao do lado do Klingo. Precisa que alguem da clinica desbloqueie a agenda la. Enquanto isso, o link de agendamento mostra horarios de fallback (pre-definidos).</p>
+      </div>
+
+      <div class="pending-item">
+        <h4>2. Agendamentos perdidos precisam de atencao manual</h4>
+        <p>4 agendamentos que nao foram pro Klingo. O que precisa ser feito:</p>
+        <ul style="margin-top: 8px; margin-left: 20px; font-size: 13px; color: var(--text-secondary); line-height: 2;">
+          <li><strong>Brancos</strong> (hoje 14:00) &mdash; verificar se ja foi agendado no Klingo manualmente; se nao, agendar</li>
+          <li><strong>Renata Assis</strong> (hoje 09:00) &mdash; mesma coisa, verificar e sincronizar</li>
+          <li><strong>Saraiva</strong> (10/03) &mdash; o CPF nao existe no Klingo, precisa cadastrar o paciente la primeiro</li>
+          <li><strong>Marcela Matsuo</strong> (2023) &mdash; agendamento fantasma de 2 anos atras, pode ser apagado</li>
+        </ul>
+      </div>
+
+      <div class="pending-item">
+        <h4>3. Container da API nao foi atualizado</h4>
+        <p>So atualizamos o Worker (que processa as mensagens). O container da API (que serve o formulario de agendamento por link) ainda esta com o codigo antigo &mdash; que ja funcionava. Se precisar atualizar, e so rodar: <code>docker compose build api && docker compose up -d api</code></p>
+      </div>
+
+      <div class="pending-item">
+        <h4>4. Agendamento direto pela Julia (sem link) nao foi testado</h4>
+        <p>A funcao que a Julia usa pra agendar direto (sem mandar link) foi corrigida no codigo, <strong>mas nao conseguimos testar</strong> porque a agenda do Klingo esta bloqueada. Quando desbloquear, precisa testar esse caminho.</p>
+      </div>
+    </section>
+
+    <!-- ════════════════════ SECTION 7: TIMELINE ════════════════════ -->
+    <section id="timeline" class="section">
+      <h2 class="section-title">
+        <span class="section-num">07</span>
+        Linha do tempo (23 minutos no total)
+      </h2>
+
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-time">14:17</div>
+          <div class="timeline-dot blue"></div>
+          <div class="timeline-content"><strong>Comecamos a investigar</strong> &mdash; entramos no servidor, olhamos banco de dados e logs</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:17</div>
+          <div class="timeline-dot blue"></div>
+          <div class="timeline-content"><strong>Achamos os 6 primeiros problemas e corrigimos</strong> &mdash; todos na comunicacao com o Klingo</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:24</div>
+          <div class="timeline-dot red"></div>
+          <div class="timeline-content"><strong>Primeiro teste</strong> &mdash; mandamos mensagem simulada, rota errada, deu 404</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:25</div>
+          <div class="timeline-dot orange"></div>
+          <div class="timeline-content"><strong>Segundo teste</strong> &mdash; rota certa, mas triagem bloqueando o agendamento</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:29</div>
+          <div class="timeline-dot blue"></div>
+          <div class="timeline-content"><strong>Deploy 1</strong> &mdash; subimos a correcao dos 6 problemas do Klingo + correcao parcial da triagem</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:31</div>
+          <div class="timeline-dot red"></div>
+          <div class="timeline-content"><strong>Terceiro teste</strong> &mdash; filtro ainda bloqueando. Descobrimos o problema 7</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:33</div>
+          <div class="timeline-dot blue"></div>
+          <div class="timeline-content"><strong>Deploy 2</strong> &mdash; correcao do filtro que bloqueava agendamento</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:35</div>
+          <div class="timeline-dot red"></div>
+          <div class="timeline-content"><strong>Quarto teste</strong> &mdash; Julia nao chamava as funcoes de agendamento. Descobrimos o problema 9</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:37</div>
+          <div class="timeline-dot blue"></div>
+          <div class="timeline-content"><strong>Deploy 3</strong> &mdash; correcao dos problemas 7, 8, 9 + instrucoes da Julia atualizadas</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:39</div>
+          <div class="timeline-dot green"></div>
+          <div class="timeline-content"><strong>Quinto teste &mdash; FUNCIONOU!</strong> Link de agendamento gerado e enviado pro paciente</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-time">14:40</div>
+          <div class="timeline-dot green"></div>
+          <div class="timeline-content"><strong>Confirmacao no banco</strong> &mdash; link criado certinho, fluxo completo validado</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer ── -->
+    <footer class="report-footer">
+      <div class="brand">IRB Prime Care &mdash; Relatorio de Correcoes</div>
+      <div>Gerado em 12 de Marco de 2026, 14:45 BRT</div>
+      <div style="margin-top: 4px; font-size: 11px;">irb-whatsapp-ai &bull; Agendamento WhatsApp &rarr; Klingo &bull; v3.2</div>
+    </footer>
+
+  </div><!-- .content -->
+</div><!-- .main -->
+
+</body>
+</html>
