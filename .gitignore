@@ -15,3 +15,6 @@ env/
 *.swp
 *.swo
 .DS_Store
+.venv-*/
+node_modules/
+*.zip
