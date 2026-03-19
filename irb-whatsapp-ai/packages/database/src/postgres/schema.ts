@@ -24,6 +24,11 @@ export const patients = pgTable('patients', {
   klingoPatientId: integer('klingo_patient_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  // UTM tracking
+  utmSource: varchar('utm_source', { length: 100 }),
+  utmMedium: varchar('utm_medium', { length: 100 }),
+  utmCampaign: varchar('utm_campaign', { length: 200 }),
+  campaignId: integer('campaign_id').references((): any => campaigns.id),
 });
 
 export const users = pgTable('users', {
@@ -985,4 +990,89 @@ export const cashFlowSnapshots = pgTable('cash_flow_snapshots', {
    snapshotDateIdx: index('cash_flow_snapshots_snapshot_date_idx').on(table.snapshotDate),
    costCenterIdx: index('cash_flow_snapshots_cost_center_id_idx').on(table.costCenterId),
    dateAndCenterIdx: uniqueIndex('cash_flow_snapshots_date_center_idx').on(table.snapshotDate, table.costCenterId),
+}));
+
+// ============================================
+// === CRM MODULE - Campaigns, Pipeline & Leads ===
+// ============================================
+
+// Marketing Campaigns
+export const campaigns = pgTable('campaigns', {
+   id: serial('id').primaryKey(),
+   name: varchar('name', { length: 200 }).notNull(),
+   code: varchar('code', { length: 50 }).unique().notNull(),
+   channel: varchar('channel', { length: 50 }), // google_ads, meta_ads, site, indicacao, organico
+   medium: varchar('medium', { length: 50 }), // cpc, cpm, social, organic, referral
+   landingPage: varchar('landing_page', { length: 500 }),
+   status: varchar('status', { length: 20 }).default('active'), // active, paused, ended
+   budget: integer('budget'), // monthly budget in cents
+   startDate: timestamp('start_date', { withTimezone: true }),
+   endDate: timestamp('end_date', { withTimezone: true }),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   codeIdx: uniqueIndex('campaigns_code_idx').on(table.code),
+   statusIdx: index('campaigns_status_idx').on(table.status),
+   channelIdx: index('campaigns_channel_idx').on(table.channel),
+}));
+
+// Sales Pipeline Stages
+export const pipelineStages = pgTable('pipeline_stages', {
+   id: serial('id').primaryKey(),
+   name: varchar('name', { length: 100 }).notNull(),
+   order: integer('order').notNull(),
+   color: varchar('color', { length: 7 }), // hex color for kanban
+   isDefault: boolean('is_default').default(false),
+   isClosed: boolean('is_closed').default(false),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// Sales Leads
+export const leads = pgTable('leads', {
+   id: serial('id').primaryKey(),
+   patientId: uuid('patient_id').references(() => patients.id),
+   campaignId: integer('campaign_id').references(() => campaigns.id),
+   stageId: integer('stage_id').references(() => pipelineStages.id).notNull(),
+   name: varchar('name', { length: 200 }).notNull(),
+   phone: varchar('phone', { length: 20 }).notNull(),
+   email: varchar('email', { length: 200 }),
+   source: varchar('source', { length: 50 }), // google_ads, meta_ads, site, whatsapp_organic, indicacao
+   utmSource: varchar('utm_source', { length: 100 }),
+   utmMedium: varchar('utm_medium', { length: 100 }),
+   utmCampaign: varchar('utm_campaign', { length: 200 }),
+   utmContent: varchar('utm_content', { length: 200 }),
+   utmTerm: varchar('utm_term', { length: 200 }),
+   firstMessage: text('first_message'),
+   interest: varchar('interest', { length: 200 }), // e.g. "ortodontia"
+   assignedTo: uuid('assigned_to').references(() => users.id),
+   value: integer('value'), // estimated deal value in cents
+   status: varchar('status', { length: 20 }).default('open'), // open, won, lost
+   lostReason: varchar('lost_reason', { length: 200 }),
+   convertedAt: timestamp('converted_at', { withTimezone: true }),
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   patientIdx: index('leads_patient_id_idx').on(table.patientId),
+   campaignIdx: index('leads_campaign_id_idx').on(table.campaignId),
+   stageIdx: index('leads_stage_id_idx').on(table.stageId),
+   phoneIdx: index('leads_phone_idx').on(table.phone),
+   statusIdx: index('leads_status_idx').on(table.status),
+   sourceIdx: index('leads_source_idx').on(table.source),
+   assignedToIdx: index('leads_assigned_to_idx').on(table.assignedTo),
+   createdAtIdx: index('leads_created_at_idx').on(table.createdAt),
+}));
+
+// Lead Activity Log
+export const leadActivities = pgTable('lead_activities', {
+   id: serial('id').primaryKey(),
+   leadId: integer('lead_id').references(() => leads.id).notNull(),
+   userId: uuid('user_id').references(() => users.id),
+   type: varchar('type', { length: 50 }).notNull(), // note, call, whatsapp, email, stage_change, assignment
+   description: text('description'),
+   metadata: text('metadata'), // JSON for extra data
+   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+}, (table) => ({
+   leadIdx: index('lead_activities_lead_id_idx').on(table.leadId),
+   typeIdx: index('lead_activities_type_idx').on(table.type),
+   createdAtIdx: index('lead_activities_created_at_idx').on(table.createdAt),
 }));

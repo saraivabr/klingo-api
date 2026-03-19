@@ -85,6 +85,18 @@ async function seedCoreData() {
     { klingoPlanId: 6, name: 'PRIME ELITE', slug: 'prime-elite', priceCents: 20000, description: 'Plano completo com cobertura máxima', features: ['Tudo do Plus', 'Check-up anual incluso', 'Atendimento preferencial'] },
   ]).onConflictDoNothing();
 
+  // CRM Pipeline Stages
+  await db.insert(schema.pipelineStages).values([
+    { name: 'Novo Lead', order: 1, color: '#3B82F6', isDefault: true, isClosed: false },
+    { name: 'Contato Feito', order: 2, color: '#8B5CF6', isDefault: false, isClosed: false },
+    { name: 'Qualificado', order: 3, color: '#F59E0B', isDefault: false, isClosed: false },
+    { name: 'Agendamento', order: 4, color: '#10B981', isDefault: false, isClosed: false },
+    { name: 'Consulta Realizada', order: 5, color: '#06B6D4', isDefault: false, isClosed: false },
+    { name: 'Proposta Enviada', order: 6, color: '#EC4899', isDefault: false, isClosed: false },
+    { name: 'Fechado Ganho', order: 7, color: '#22C55E', isDefault: false, isClosed: true },
+    { name: 'Fechado Perdido', order: 8, color: '#EF4444', isDefault: false, isClosed: true },
+  ]).onConflictDoNothing();
+
   await db.insert(schema.aiSettings).values([
     { key: 'model', value: 'gpt-4o' },
     { key: 'max_tokens', value: 1024 },
