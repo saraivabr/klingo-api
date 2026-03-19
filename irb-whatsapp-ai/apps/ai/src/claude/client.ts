@@ -220,7 +220,7 @@ export async function callClaude(params: {
     }
 
     const response = await openai.chat.completions.create({
-      model: process.env.AI_MODEL || 'gpt-4o',
+      model: process.env.AI_MODEL || 'gpt-4o-mini',
       max_tokens: maxTokens,
       temperature,
       messages: allMessages,
