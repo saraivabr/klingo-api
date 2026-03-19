@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, Settings, LogOut, CreditCard, DollarSign, Video, Calendar, Stethoscope, Receipt, FlaskConical, Pill, Activity, ChevronDown, ChevronRight, ArrowDownCircle, ArrowUpCircle, TrendingUp, Users, ClipboardCheck, WalletCards, Building2, ShoppingCart } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Settings, LogOut, CreditCard, DollarSign, Video, Calendar, Stethoscope, Receipt, FlaskConical, Pill, Activity, ChevronDown, ChevronRight, ArrowDownCircle, ArrowUpCircle, TrendingUp, Users, ClipboardCheck, WalletCards, Building2, ShoppingCart, Columns3, Target, Megaphone } from 'lucide-react';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
 const ALL_NAV_ITEMS = [
@@ -30,6 +30,12 @@ function getUserAccess(): { role: string; permissions: string[] } {
   } catch { return { role: '', permissions: [] }; }
 }
 
+const CRM_SUBITEMS = [
+  { to: '/crm/pipeline', icon: Columns3, label: 'Pipeline', permission: 'crm.view' },
+  { to: '/crm/metrics', icon: Target, label: 'Metricas', permission: 'crm.view' },
+  { to: '/crm/campaigns', icon: Megaphone, label: 'Campanhas', permission: 'crm.view' },
+];
+
 const FINANCE_SUBITEMS = [
   { to: '/finance', icon: DollarSign, label: 'Visão Geral', permission: 'finance.view' },
   { to: '/finance/payable', icon: ArrowDownCircle, label: 'Contas a Pagar', permission: 'finance.payable.view' },
@@ -46,10 +52,12 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [financeExpanded, setFinanceExpanded] = useState(location.pathname.startsWith('/finance'));
+  const [crmExpanded, setCrmExpanded] = useState(location.pathname.startsWith('/crm'));
   const { role: userRole, permissions } = getUserAccess();
   const canManageUsers = userRole === 'admin' || permissions.includes('users.manage');
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => !('adminOnly' in item && item.adminOnly) || canManageUsers);
   const visibleFinanceItems = FINANCE_SUBITEMS.filter((item) => userRole === 'admin' || permissions.includes(item.permission));
+  const visibleCrmItems = CRM_SUBITEMS.filter((item) => userRole === 'admin' || permissions.includes(item.permission));
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -92,6 +100,46 @@ export default function Sidebar() {
             )}
           </NavLink>
         ))}
+
+        {/* CRM Section with Submenu */}
+        <div>
+          <button
+            onClick={() => setCrmExpanded(!crmExpanded)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              location.pathname.startsWith('/crm')
+                ? 'bg-white/10 text-white'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Target size={18} />
+              CRM
+            </div>
+            {crmExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </button>
+
+          {crmExpanded && (
+            <div className="ml-4 mt-1 space-y-0.5">
+              {visibleCrmItems.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      isActive
+                        ? 'bg-purple-600/20 text-purple-400 border-l-2 border-purple-400'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+                    }`
+                  }
+                >
+                  <Icon size={16} />
+                  {label}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Finance Section with Submenu */}
         <div>

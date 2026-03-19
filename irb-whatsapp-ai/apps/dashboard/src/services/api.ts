@@ -709,4 +709,82 @@ export const api = {
 
   changeMyPassword: (currentPassword: string, newPassword: string) =>
     request<any>('/users/me/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
+
+  // ===========================================
+  // CRM
+  // ===========================================
+
+  getCRMPipelineStages: () =>
+    request<{ stages: any[] }>('/crm/pipeline/stages'),
+
+  getCRMLeads: (params?: Record<string, string>) =>
+    request<{ leads: any[]; total: number }>(
+      `/crm/leads?${new URLSearchParams(params as any || {})}`
+    ),
+
+  getCRMLead: (id: string) =>
+    request<any>(`/crm/leads/${id}`),
+
+  createCRMLead: (data: {
+    name: string;
+    phone: string;
+    email?: string;
+    source: string;
+    interest?: string;
+    campaignId?: string;
+  }) =>
+    request<any>('/crm/leads', { method: 'POST', body: JSON.stringify(data) }),
+
+  updateCRMLead: (id: string, data: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    assignedTo?: string;
+    value?: number;
+    interest?: string;
+  }) =>
+    request<any>(`/crm/leads/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  moveCRMLeadStage: (id: string, stageId: string) =>
+    request<any>(`/crm/leads/${id}/stage`, { method: 'PUT', body: JSON.stringify({ stageId }) }),
+
+  addCRMLeadActivity: (id: string, data: { type: string; description: string }) =>
+    request<any>(`/crm/leads/${id}/activity`, { method: 'POST', body: JSON.stringify(data) }),
+
+  convertCRMLead: (id: string) =>
+    request<any>(`/crm/leads/${id}/convert`, { method: 'POST', body: '{}' }),
+
+  closeCRMLead: (id: string, data: { outcome: string; reason?: string }) =>
+    request<any>(`/crm/leads/${id}/close`, { method: 'POST', body: JSON.stringify(data) }),
+
+  getCRMMetrics: () =>
+    request<any>('/crm/metrics'),
+
+  getCRMCampaigns: () =>
+    request<{ campaigns: any[] }>('/crm/campaigns'),
+
+  createCRMCampaign: (data: {
+    name: string;
+    code: string;
+    channel: string;
+    medium?: string;
+    landingPage?: string;
+    budget?: number;
+    startDate?: string;
+    endDate?: string;
+  }) =>
+    request<any>('/crm/campaigns', { method: 'POST', body: JSON.stringify(data) }),
+
+  updateCRMCampaign: (id: string, data: {
+    name?: string;
+    code?: string;
+    channel?: string;
+    medium?: string;
+    landingPage?: string;
+    budget?: number;
+    startDate?: string;
+    endDate?: string;
+    status?: string;
+  }) =>
+    request<any>(`/crm/campaigns/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };

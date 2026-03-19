@@ -26,6 +26,9 @@ import PaymentOrders from './pages/PaymentOrders';
 import FinanceCadastros from './pages/FinanceCadastros';
 import Users from './pages/Users';
 import PDV from './pages/PDV';
+import CRMPipeline from './pages/CRMPipeline';
+import CRMMetrics from './pages/CRMMetrics';
+import CRMCampaigns from './pages/CRMCampaigns';
 
 function App() {
   const token = localStorage.getItem('token');
@@ -59,6 +62,9 @@ function App() {
          <Route path="/finance/reimbursements" element={<Reimbursements />} />
          <Route path="/finance/orders" element={<PaymentOrders />} />
          <Route path="/finance/cadastros" element={<FinanceCadastros />} />
+         <Route path="/crm/pipeline" element={<CRMPipeline />} />
+         <Route path="/crm/metrics" element={<CRMMetrics />} />
+         <Route path="/crm/campaigns" element={<CRMCampaigns />} />
          <Route path="/teleconsulta" element={<Teleconsultation />} />
          <Route path="/pdv" element={<PDV />} />
          <Route path="/users" element={<Users />} />
