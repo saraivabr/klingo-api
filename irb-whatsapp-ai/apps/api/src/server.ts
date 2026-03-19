@@ -5,7 +5,9 @@ import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
-import { connectMongo } from '@irb/database';
+import { connectMongo, db, redis } from '@irb/database';
+import { sql } from 'drizzle-orm';
+import mongoose from 'mongoose';
 import { uazapiWebhookRoutes } from './routes/webhooks/uazapi.js';
 import { klingoWebhookRoutes } from './routes/webhooks/klingo.js';
 import { conversationRoutes } from './routes/conversations.js';
@@ -57,6 +59,35 @@ async function start() {
   // Connect databases
   await connectMongo();
   app.log.info('MongoDB connected');
+
+  // Health check (public, no auth)
+  app.get('/api/health', async (_request, reply) => {
+    const checks: Record<string, string> = {};
+
+    // Redis
+    try {
+      await redis.ping();
+      checks.redis = 'ok';
+    } catch { checks.redis = 'unavailable'; }
+
+    // Postgres
+    try {
+      await db.execute(sql`SELECT 1`);
+      checks.postgres = 'ok';
+    } catch { checks.postgres = 'unavailable'; }
+
+    // Mongo
+    try {
+      checks.mongo = mongoose.connection.readyState === 1 ? 'ok' : 'unavailable';
+    } catch { checks.mongo = 'unavailable'; }
+
+    return reply.send({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      services: checks,
+    });
+  });
 
   // Public routes (with specific rate limits)
   await app.register(authRoutes, { prefix: '/api/auth' });
