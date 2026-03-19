@@ -36,6 +36,12 @@ export const PERMISSION_GROUPS = {
     'finance.orders.view',
     'finance.cadastros.view',
   ],
+  crm: [
+    'crm.leads.view',
+    'crm.leads.manage',
+    'crm.campaigns.manage',
+    'crm.metrics.view',
+  ],
   admin: [
     'settings.view',
     'users.manage',
@@ -66,6 +72,10 @@ export const ACCESS_PROFILES = {
       'finance.reimbursements.view',
       'finance.orders.view',
       'finance.cadastros.view',
+      'crm.leads.view',
+      'crm.leads.manage',
+      'crm.campaigns.manage',
+      'crm.metrics.view',
     ],
   },
   finance_analyst: {

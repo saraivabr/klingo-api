@@ -33,6 +33,7 @@ import { cashFlowRoutes } from './routes/cash-flow.js';
 import { financeOpsRoutes } from './routes/finance-ops.js';
 import { userRoutes } from './routes/users.js';
 import { pdvRoutes } from './routes/pdv.js';
+import { crmRoutes } from './routes/crm.js';
 import { websocketHandler } from './websocket/handler.js';
 
 const PORT = parseInt(process.env.API_PORT || '3001');
@@ -123,6 +124,7 @@ await app.register(opdRoutes, { prefix: '/api/opd' });
   await app.register(financeOpsRoutes, { prefix: '/api/finance-ops' });
   await app.register(userRoutes, { prefix: '/api/users' });
   await app.register(pdvRoutes, { prefix: '/api/pdv' });
+  await app.register(crmRoutes, { prefix: '/api/crm' });
 
    // WebSocket
   await app.register(websocketHandler, { prefix: '/ws' });
