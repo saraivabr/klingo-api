@@ -61,6 +61,36 @@ export interface AsaasPixQrCodeResponse {
   expirationDate: string;
 }
 
+export interface AsaasChargeRequest {
+  customer: string;
+  billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD' | 'UNDEFINED';
+  value: number;
+  dueDate: string; // YYYY-MM-DD
+  description?: string;
+  externalReference?: string;
+  installmentCount?: number;
+  installmentValue?: number;
+  postalService?: boolean;
+}
+
+export interface AsaasCreditCardPayRequest {
+  creditCard: {
+    holderName: string;
+    number: string;
+    expiryMonth: string;
+    expiryYear: string;
+    ccv: string;
+  };
+  creditCardHolderInfo: {
+    name: string;
+    email: string;
+    cpfCnpj: string;
+    postalCode: string;
+    addressNumber: string;
+    phone: string;
+  };
+}
+
 export class AsaasClient {
   private baseUrl: string;
   private apiKey: string;
@@ -142,6 +172,42 @@ export class AsaasClient {
 
   async getPixQrCode(paymentId: string): Promise<AsaasPixQrCodeResponse> {
     return this.request('GET', `/payments/${paymentId}/pixQrCode`);
+  }
+
+  // === Charges (Cobranças avulsas) ===
+
+  async createCharge(data: AsaasChargeRequest): Promise<AsaasPaymentResponse> {
+    return this.request('POST', '/payments', data);
+  }
+
+  async listPayments(params: { customer?: string; subscription?: string; status?: string; offset?: number; limit?: number }): Promise<{ data: AsaasPaymentResponse[]; totalCount: number }> {
+    const qs = new URLSearchParams();
+    if (params.customer) qs.set('customer', params.customer);
+    if (params.subscription) qs.set('subscription', params.subscription);
+    if (params.status) qs.set('status', params.status);
+    if (params.offset !== undefined) qs.set('offset', params.offset.toString());
+    if (params.limit !== undefined) qs.set('limit', params.limit.toString());
+    return this.request('GET', `/payments?${qs.toString()}`);
+  }
+
+  async deletePayment(id: string): Promise<{ deleted: boolean; id: string }> {
+    return this.request('DELETE', `/payments/${id}`);
+  }
+
+  async getPaymentStatus(id: string): Promise<AsaasPaymentResponse> {
+    return this.request('GET', `/payments/${id}`);
+  }
+
+  async payWithCreditCard(paymentId: string, data: AsaasCreditCardPayRequest): Promise<AsaasPaymentResponse> {
+    return this.request('POST', `/payments/${paymentId}/payWithCreditCard`, data);
+  }
+
+  async getCustomer(id: string): Promise<AsaasCustomerResponse> {
+    return this.request('GET', `/customers/${id}`);
+  }
+
+  async updateCustomer(id: string, data: Partial<AsaasCustomerRequest>): Promise<AsaasCustomerResponse> {
+    return this.request('PUT', `/customers/${id}`, data);
   }
 }
 

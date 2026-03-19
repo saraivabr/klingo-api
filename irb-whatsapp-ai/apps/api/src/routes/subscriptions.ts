@@ -4,6 +4,7 @@ import { db, schema } from '@irb/database';
 import { QUEUE_NAMES } from '@irb/shared/constants';
 import { authMiddleware } from '../middleware/auth.js';
 import { getAsaasClient } from '../services/asaas.js';
+import { syncPatientPlanToKlingo } from '../services/klingo-plan-sync.js';
 import { eq, and, desc, like, or, sql } from 'drizzle-orm';
 
 const redisConnection = {
@@ -210,6 +211,12 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       .limit(1);
     if (existing) return reply.status(400).send({ error: 'Paciente já possui assinatura ativa' });
 
+    try {
+      await syncPatientPlanToKlingo(patient, plan);
+    } catch (err) {
+      return reply.status(400).send({ error: `Falha ao sincronizar plano na Klingo: ${(err as Error).message}` });
+    }
+
     // Calculate next due date (next month, day 10)
     const now = new Date();
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 10);
@@ -346,6 +353,18 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       .limit(1);
     if (!newPlan) return reply.status(400).send({ error: 'Plano não encontrado' });
 
+    const [patient] = await db.select()
+      .from(schema.patients)
+      .where(eq(schema.patients.id, sub.patientId))
+      .limit(1);
+    if (!patient) return reply.status(404).send({ error: 'Paciente não encontrado' });
+
+    try {
+      await syncPatientPlanToKlingo(patient, newPlan);
+    } catch (err) {
+      return reply.status(400).send({ error: `Falha ao atualizar plano na Klingo: ${(err as Error).message}` });
+    }
+
     await db.update(schema.subscriptions)
       .set({ planId: newPlanId })
       .where(eq(schema.subscriptions.id, id));
@@ -395,14 +414,28 @@ export async function subscriptionRoutes(app: FastifyInstance) {
     if (!sub) return reply.status(404).send({ error: 'Assinatura não encontrada' });
     if (sub.status !== 'suspended') return reply.status(400).send({ error: 'Só é possível reativar assinaturas suspensas' });
 
-    await db.update(schema.subscriptions)
-      .set({ status: 'active' })
-      .where(eq(schema.subscriptions.id, id));
-
     const [patient] = await db.select()
       .from(schema.patients)
       .where(eq(schema.patients.id, sub.patientId))
       .limit(1);
+    if (!patient) return reply.status(404).send({ error: 'Paciente não encontrado' });
+
+    const [plan] = await db.select()
+      .from(schema.plans)
+      .where(eq(schema.plans.id, sub.planId))
+      .limit(1);
+    if (!plan) return reply.status(404).send({ error: 'Plano não encontrado' });
+
+    try {
+      await syncPatientPlanToKlingo(patient, plan);
+    } catch (err) {
+      return reply.status(400).send({ error: `Falha ao reativar plano na Klingo: ${(err as Error).message}` });
+    }
+
+    await db.update(schema.subscriptions)
+      .set({ status: 'active' })
+      .where(eq(schema.subscriptions.id, id));
+
     if (patient?.phone) {
       await paymentNotificationQueue.add('notify', {
         type: 'subscription_reactivated',

@@ -25,6 +25,7 @@ interface AsaasWebhookPayload {
     confirmedDate?: string;
     invoiceUrl?: string;
     bankSlipUrl?: string;
+    externalReference?: string;
   };
 }
 
@@ -88,61 +89,99 @@ async function getPatientPhone(patientId: string): Promise<string | null> {
 }
 
 async function handlePaymentCreated(payment: AsaasWebhookPayload['payment'] & {}) {
-  if (!payment.subscription) return;
+  // Handle subscription payments
+  if (payment.subscription) {
+    const sub = await findSubscriptionByAsaasId(payment.subscription);
+    if (!sub) {
+      console.warn(`[asaas-webhook] Subscription not found for asaas ID: ${payment.subscription}`);
+      return;
+    }
 
-  const sub = await findSubscriptionByAsaasId(payment.subscription);
-  if (!sub) {
-    console.warn(`[asaas-webhook] Subscription not found for asaas ID: ${payment.subscription}`);
-    return;
+    await db.insert(schema.payments).values({
+      subscriptionId: sub.id,
+      asaasPaymentId: payment.id,
+      status: 'PENDING',
+      billingType: payment.billingType,
+      amountCents: Math.round(payment.value * 100),
+      dueDate: payment.dueDate,
+      invoiceUrl: payment.invoiceUrl || null,
+      asaasPayload: payment as any,
+    }).onConflictDoNothing();
   }
-
-  // Upsert payment
-  await db.insert(schema.payments).values({
-    subscriptionId: sub.id,
-    asaasPaymentId: payment.id,
-    status: 'PENDING',
-    billingType: payment.billingType,
-    amountCents: Math.round(payment.value * 100),
-    dueDate: payment.dueDate,
-    invoiceUrl: payment.invoiceUrl || null,
-    asaasPayload: payment as any,
-  }).onConflictDoNothing();
+  // Standalone charges (PDV) are tracked via externalReference → bill.id
 }
 
 async function handlePaymentConfirmed(payment: AsaasWebhookPayload['payment'] & {}) {
-  if (!payment.subscription) return;
+  // Handle subscription payments
+  if (payment.subscription) {
+    const sub = await findSubscriptionByAsaasId(payment.subscription);
+    if (!sub) return;
 
-  const sub = await findSubscriptionByAsaasId(payment.subscription);
-  if (!sub) return;
+    if (payment.id) {
+      await db.update(schema.payments)
+        .set({
+          status: payment.status === 'RECEIVED' ? 'RECEIVED' : 'CONFIRMED',
+          paidAt: payment.confirmedDate ? new Date(payment.confirmedDate) : new Date(),
+          asaasPayload: payment as any,
+        })
+        .where(eq(schema.payments.asaasPaymentId, payment.id));
+    }
 
-  // Update payment status
-  if (payment.id) {
-    await db.update(schema.payments)
-      .set({
-        status: payment.status === 'RECEIVED' ? 'RECEIVED' : 'CONFIRMED',
-        paidAt: payment.confirmedDate ? new Date(payment.confirmedDate) : new Date(),
-        asaasPayload: payment as any,
-      })
-      .where(eq(schema.payments.asaasPaymentId, payment.id));
+    if (sub.status === 'overdue') {
+      await db.update(schema.subscriptions)
+        .set({ status: 'active' })
+        .where(eq(schema.subscriptions.id, sub.id));
+    }
+
+    const phone = await getPatientPhone(sub.patientId);
+    if (phone) {
+      await paymentNotificationQueue.add('notify', {
+        type: 'payment_confirmed',
+        patientPhone: phone,
+        subscriptionId: sub.id,
+        paymentId: payment.id,
+        amountCents: Math.round(payment.value * 100),
+      }, { removeOnComplete: 50, removeOnFail: 100 });
+    }
+    return;
   }
 
-  // If subscription was overdue, set back to active
-  if (sub.status === 'overdue') {
-    await db.update(schema.subscriptions)
-      .set({ status: 'active' })
-      .where(eq(schema.subscriptions.id, sub.id));
-  }
+  // Handle standalone charges (PDV) — match via externalReference = bill.id
+  if (payment.externalReference) {
+    const billId = payment.externalReference;
+    const [bill] = await db.select()
+      .from(schema.bills)
+      .where(eq(schema.bills.id, billId))
+      .limit(1);
 
-  // Enqueue WhatsApp notification
-  const phone = await getPatientPhone(sub.patientId);
-  if (phone) {
-    await paymentNotificationQueue.add('notify', {
-      type: 'payment_confirmed',
-      patientPhone: phone,
-      subscriptionId: sub.id,
-      paymentId: payment.id,
-      amountCents: Math.round(payment.value * 100),
-    }, { removeOnComplete: 50, removeOnFail: 100 });
+    if (bill) {
+      const amountCents = Math.round(payment.value * 100);
+      await db.insert(schema.billTransactions).values({
+        billId: bill.id,
+        amountPaid: amountCents,
+        paymentMethod: payment.billingType.toLowerCase(),
+        transactionRef: payment.id,
+        notes: `Asaas ${payment.status}`,
+      });
+
+      // Mark bill as paid
+      await db.update(schema.bills)
+        .set({ status: 'paid' })
+        .where(eq(schema.bills.id, bill.id));
+
+      console.log(`[asaas-webhook] PDV bill ${bill.billNumber} marked as paid`);
+
+      // Notify patient via WhatsApp
+      const phone = await getPatientPhone(bill.patientId);
+      if (phone) {
+        await paymentNotificationQueue.add('notify', {
+          type: 'payment_confirmed',
+          patientPhone: phone,
+          paymentId: payment.id,
+          amountCents,
+        }, { removeOnComplete: 50, removeOnFail: 100 });
+      }
+    }
   }
 }
 

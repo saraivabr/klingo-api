@@ -32,8 +32,19 @@ export const users = pgTable('users', {
   passwordHash: varchar('password_hash', { length: 255 }).notNull(),
   name: varchar('name', { length: 100 }).notNull(),
   role: varchar('role', { length: 20 }).default('attendant'),
+  department: varchar('department', { length: 100 }),
+  jobTitle: varchar('job_title', { length: 100 }),
+  managerName: varchar('manager_name', { length: 100 }),
+  accessProfile: varchar('access_profile', { length: 50 }).default('attendant_basic'),
+  permissionOverrides: jsonb('permission_overrides').$type<{ allow?: string[]; deny?: string[] }>(),
+  accessScope: jsonb('access_scope').$type<{
+    allCostCenters?: boolean;
+    costCenterIds?: string[];
+    units?: string[];
+  }>(),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 export const services = pgTable('services', {
