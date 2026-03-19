@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "openai": "^4.70.0",
     "postgres": "^3.4.0",
     "@irb/shared": "workspace:*",
