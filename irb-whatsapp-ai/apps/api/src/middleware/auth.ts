@@ -10,7 +10,29 @@ export async function authMiddleware(request: FastifyRequest, reply: FastifyRepl
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { userId: string; email: string; role: string };
-    user: { userId: string; email: string; role: string };
+    payload: {
+      userId: string;
+      email: string;
+      role: string;
+      accessProfile?: string;
+      permissions?: string[];
+      scope?: {
+        allCostCenters: boolean;
+        costCenterIds: string[];
+        units: string[];
+      };
+    };
+    user: {
+      userId: string;
+      email: string;
+      role: string;
+      accessProfile?: string;
+      permissions?: string[];
+      scope?: {
+        allCostCenters: boolean;
+        costCenterIds: string[];
+        units: string[];
+      };
+    };
   }
 }
