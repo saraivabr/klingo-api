@@ -205,7 +205,8 @@ export class CashFlowService {
       lte(schema.accountsReceivable.dueDate, endStr),
       or(
         eq(schema.accountsReceivable.status, 'pending'),
-        eq(schema.accountsReceivable.status, 'partial')
+        eq(schema.accountsReceivable.status, 'partial'),
+        eq(schema.accountsReceivable.status, 'overdue')
       ),
     ];
 
@@ -225,7 +226,8 @@ export class CashFlowService {
       lte(schema.accountsPayable.dueDate, endStr),
       or(
         eq(schema.accountsPayable.status, 'pending'),
-        eq(schema.accountsPayable.status, 'approved')
+        eq(schema.accountsPayable.status, 'approved'),
+        eq(schema.accountsPayable.status, 'overdue')
       ),
     ];
     if (costCenterId) payableConditions.push(eq(schema.accountsPayable.costCenterId, costCenterId));
@@ -346,15 +348,15 @@ export class CashFlowService {
 
     // Receivables
     const [receivableSummary] = await db.select({
-      totalOpen: sql<number>`coalesce(sum(case when ${schema.accountsReceivable.status} in ('pending', 'partial') then ${schema.accountsReceivable.totalAmount} - ${schema.accountsReceivable.receivedAmount} - ${schema.accountsReceivable.glosaAmount} else 0 end), 0)`,
-      totalOverdue: sql<number>`coalesce(sum(case when ${schema.accountsReceivable.status} in ('pending', 'partial') and ${schema.accountsReceivable.dueDate} < ${today} then ${schema.accountsReceivable.totalAmount} - ${schema.accountsReceivable.receivedAmount} - ${schema.accountsReceivable.glosaAmount} else 0 end), 0)`,
+      totalOpen: sql<number>`coalesce(sum(case when ${schema.accountsReceivable.status} in ('pending', 'partial', 'overdue') then ${schema.accountsReceivable.totalAmount} - ${schema.accountsReceivable.receivedAmount} - ${schema.accountsReceivable.glosaAmount} else 0 end), 0)`,
+      totalOverdue: sql<number>`coalesce(sum(case when ${schema.accountsReceivable.status} in ('pending', 'partial', 'overdue') and ${schema.accountsReceivable.dueDate} < ${today} then ${schema.accountsReceivable.totalAmount} - ${schema.accountsReceivable.receivedAmount} - ${schema.accountsReceivable.glosaAmount} else 0 end), 0)`,
       receivedThisMonth: sql<number>`coalesce(sum(case when ${schema.accountsReceivable.receivedDate} >= ${monthStartStr} then ${schema.accountsReceivable.receivedAmount} else 0 end), 0)`,
     }).from(schema.accountsReceivable);
 
     // Payables
     const [payableSummary] = await db.select({
-      totalOpen: sql<number>`coalesce(sum(case when ${schema.accountsPayable.status} in ('pending', 'approved') then ${schema.accountsPayable.netAmount} else 0 end), 0)`,
-      totalOverdue: sql<number>`coalesce(sum(case when ${schema.accountsPayable.status} in ('pending', 'approved') and ${schema.accountsPayable.dueDate} < ${today} then ${schema.accountsPayable.netAmount} else 0 end), 0)`,
+      totalOpen: sql<number>`coalesce(sum(case when ${schema.accountsPayable.status} in ('pending', 'approved', 'overdue') then ${schema.accountsPayable.netAmount} else 0 end), 0)`,
+      totalOverdue: sql<number>`coalesce(sum(case when ${schema.accountsPayable.status} in ('pending', 'approved', 'overdue') and ${schema.accountsPayable.dueDate} < ${today} then ${schema.accountsPayable.netAmount} else 0 end), 0)`,
       paidThisMonth: sql<number>`coalesce(sum(case when ${schema.accountsPayable.paymentDate} >= ${monthStartStr} then ${schema.accountsPayable.netAmount} else 0 end), 0)`,
       pendingApproval: sql<number>`coalesce(sum(case when ${schema.accountsPayable.status} = 'pending' then ${schema.accountsPayable.netAmount} else 0 end), 0)`,
     }).from(schema.accountsPayable);

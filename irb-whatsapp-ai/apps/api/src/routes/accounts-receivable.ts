@@ -3,11 +3,17 @@ import { db, schema } from '@irb/database';
 import { authMiddleware } from '../middleware/auth.js';
 import { eq, and, desc, gte, lte, sql, or, like, isNull } from 'drizzle-orm';
 import { AccountsReceivableService } from '../services/accounts-receivable-service.js';
+import { hasPermission } from '../lib/access-control.js';
 
 const arService = new AccountsReceivableService();
 
 export async function accountsReceivableRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
+  const requirePermission = (permission: string) => async (request: any, reply: any) => {
+    if (!hasPermission(request.user, permission)) {
+      return reply.status(403).send({ error: 'Sem permissão para esta ação financeira' });
+    }
+  };
 
   // ============================================
   // ACCOUNTS RECEIVABLE (Contas a Receber)
@@ -287,7 +293,7 @@ export async function accountsReceivableRoutes(app: FastifyInstance) {
   });
 
   // Register payment received
-  app.post('/:id/receive', async (request, reply) => {
+  app.post('/:id/receive', { preHandler: requirePermission('finance.receivable.receive') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { 
       amount, 
@@ -431,7 +437,8 @@ export async function accountsReceivableRoutes(app: FastifyInstance) {
       .where(and(
         or(
           eq(schema.accountsReceivable.status, 'pending'),
-          eq(schema.accountsReceivable.status, 'partial')
+          eq(schema.accountsReceivable.status, 'partial'),
+          eq(schema.accountsReceivable.status, 'overdue')
         ),
         sql`${schema.accountsReceivable.dueDate} < ${today}`
       ))
@@ -445,7 +452,8 @@ export async function accountsReceivableRoutes(app: FastifyInstance) {
       .where(and(
         or(
           eq(schema.accountsReceivable.status, 'pending'),
-          eq(schema.accountsReceivable.status, 'partial')
+          eq(schema.accountsReceivable.status, 'partial'),
+          eq(schema.accountsReceivable.status, 'overdue')
         ),
         sql`${schema.accountsReceivable.dueDate} < ${today}`
       ));

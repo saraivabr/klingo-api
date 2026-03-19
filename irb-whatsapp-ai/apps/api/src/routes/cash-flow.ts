@@ -3,11 +3,19 @@ import { db, schema } from '@irb/database';
 import { authMiddleware } from '../middleware/auth.js';
 import { eq, and, desc, gte, lte, sql, or } from 'drizzle-orm';
 import { CashFlowService } from '../services/cash-flow-service.js';
+import { StatementImportService } from '../services/statement-import-service.js';
+import { hasPermission } from '../lib/access-control.js';
 
 const cfService = new CashFlowService();
+const statementImportService = new StatementImportService();
 
 export async function cashFlowRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
+  const requirePermission = (permission: string) => async (request: any, reply: any) => {
+    if (!hasPermission(request.user, permission)) {
+      return reply.status(403).send({ error: 'Sem permissão para esta ação financeira' });
+    }
+  };
 
   // ============================================
   // DAILY CASH FLOW
@@ -136,6 +144,63 @@ export async function cashFlowRoutes(app: FastifyInstance) {
       .returning();
 
     return { reconciled: updated.length };
+  });
+
+  // Preview statement import with AI-assisted matching
+  app.post('/import-statement/preview', { preHandler: requirePermission('finance.cashflow.import_statement') }, async (request, reply) => {
+    const body = request.body as {
+      bankAccountId?: string;
+      fileName?: string;
+      rows?: Array<{
+        date: string;
+        description: string;
+        amount: number;
+        balance?: number | null;
+        type?: 'credit' | 'debit' | null;
+        reference?: string | null;
+      }>;
+    };
+
+    if (!body.bankAccountId || !body.fileName || !body.rows?.length) {
+      return reply.status(400).send({ error: 'bankAccountId, fileName e rows são obrigatórios' });
+    }
+
+    const preview = await statementImportService.preview({
+      bankAccountId: body.bankAccountId,
+      fileName: body.fileName,
+      rows: body.rows,
+    });
+
+    return preview;
+  });
+
+  // Apply statement import
+  app.post('/import-statement/apply', { preHandler: requirePermission('finance.cashflow.import_statement') }, async (request, reply) => {
+    const body = request.body as {
+      bankAccountId?: string;
+      fileName?: string;
+      rows?: Array<{
+        date: string;
+        description: string;
+        amount: number;
+        balance?: number | null;
+        type?: 'credit' | 'debit' | null;
+        reference?: string | null;
+      }>;
+    };
+    const user = (request as any).user;
+
+    if (!body.bankAccountId || !body.fileName || !body.rows?.length) {
+      return reply.status(400).send({ error: 'bankAccountId, fileName e rows são obrigatórios' });
+    }
+
+    const result = await statementImportService.apply({
+      bankAccountId: body.bankAccountId,
+      fileName: body.fileName,
+      rows: body.rows,
+    }, user?.id);
+
+    return result;
   });
 
   // ============================================

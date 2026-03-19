@@ -3,11 +3,17 @@ import { db, schema } from '@irb/database';
 import { authMiddleware } from '../middleware/auth.js';
 import { eq, and, desc, gte, lte, sql, or, like, isNull } from 'drizzle-orm';
 import { AccountsPayableService } from '../services/accounts-payable-service.js';
+import { hasPermission } from '../lib/access-control.js';
 
 const apService = new AccountsPayableService();
 
 export async function accountsPayableRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
+  const requirePermission = (permission: string) => async (request: any, reply: any) => {
+    if (!hasPermission(request.user, permission)) {
+      return reply.status(403).send({ error: 'Sem permissão para esta ação financeira' });
+    }
+  };
 
   // ============================================
   // ACCOUNTS PAYABLE (Contas a Pagar)
@@ -354,7 +360,7 @@ export async function accountsPayableRoutes(app: FastifyInstance) {
   });
 
   // Approve payment
-  app.post('/:id/approve', async (request, reply) => {
+  app.post('/:id/approve', { preHandler: requirePermission('finance.payable.approve') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { notes } = request.body as { notes?: string };
     const user = (request as any).user;
@@ -426,7 +432,7 @@ export async function accountsPayableRoutes(app: FastifyInstance) {
   });
 
   // Register payment (mark as paid)
-  app.post('/:id/pay', async (request, reply) => {
+  app.post('/:id/pay', { preHandler: requirePermission('finance.payable.pay') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { paymentDate, paymentMethod, bankAccountId, notes } = request.body as {
       paymentDate?: string;
@@ -506,7 +512,8 @@ export async function accountsPayableRoutes(app: FastifyInstance) {
       .where(and(
         or(
           eq(schema.accountsPayable.status, 'pending'),
-          eq(schema.accountsPayable.status, 'approved')
+          eq(schema.accountsPayable.status, 'approved'),
+          eq(schema.accountsPayable.status, 'overdue')
         ),
         lte(schema.accountsPayable.dueDate, targetDate)
       ))
@@ -564,7 +571,8 @@ export async function accountsPayableRoutes(app: FastifyInstance) {
       .where(and(
         or(
           eq(schema.accountsPayable.status, 'pending'),
-          eq(schema.accountsPayable.status, 'approved')
+          eq(schema.accountsPayable.status, 'approved'),
+          eq(schema.accountsPayable.status, 'overdue')
         ),
         sql`${schema.accountsPayable.dueDate} < ${today}`
       ))
@@ -578,7 +586,8 @@ export async function accountsPayableRoutes(app: FastifyInstance) {
       .where(and(
         or(
           eq(schema.accountsPayable.status, 'pending'),
-          eq(schema.accountsPayable.status, 'approved')
+          eq(schema.accountsPayable.status, 'approved'),
+          eq(schema.accountsPayable.status, 'overdue')
         ),
         sql`${schema.accountsPayable.dueDate} < ${today}`
       ));
