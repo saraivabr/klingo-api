@@ -1,10 +1,38 @@
 import { FastifyInstance } from 'fastify';
-import { ConversationModel, db, schema } from '@irb/database';
+import { ConversationModel, db, schema, publishEvent } from '@irb/database';
 import { authMiddleware } from '../middleware/auth.js';
 import { eq, inArray, desc } from 'drizzle-orm';
+import { Queue } from 'bullmq';
+import { QUEUE_NAMES } from '@irb/shared';
+
+const redisConnection = {
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || '6379'),
+};
+
+const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
 
 export async function conversationRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
+
+  const updateHumanResponseMetrics = (conversation: any, responseTimestamp: Date) => {
+    const lastPatientMessage = [...conversation.messages].reverse().find(
+      (message: any) => message.sender === 'patient' && message.timestamp,
+    );
+    if (!lastPatientMessage?.timestamp) return;
+
+    const responseTimeMs = Math.max(0, responseTimestamp.getTime() - new Date(lastPatientMessage.timestamp).getTime());
+    if (!responseTimeMs) return;
+
+    if (!conversation.metrics.firstResponseTimeMs) {
+      conversation.metrics.firstResponseTimeMs = responseTimeMs;
+    }
+
+    const previousOutgoingMessages = (conversation.metrics.aiMessages || 0) + (conversation.metrics.humanMessages || 0);
+    const previousAvg = conversation.metrics.avgResponseTimeMs || 0;
+    conversation.metrics.avgResponseTimeMs =
+      Math.round(((previousAvg * previousOutgoingMessages) + responseTimeMs) / (previousOutgoingMessages + 1));
+  };
 
   // List conversations (enriched with booking data)
   app.get('/', async (request) => {
@@ -91,6 +119,27 @@ export async function conversationRoutes(app: FastifyInstance) {
     });
 
     return { conversations: enriched, total, page, limit };
+  });
+
+  // Search conversations (must be before /:id routes)
+  app.get('/search', async (request) => {
+    const { q, limit = 20 } = request.query as { q?: string; limit?: number };
+    if (!q || q.trim().length < 2) return { conversations: [] };
+
+    const regex = new RegExp(q.trim(), 'i');
+    const conversations = await ConversationModel
+      .find({
+        $or: [
+          { patientPhone: regex },
+          { patientName: regex },
+        ],
+      })
+      .select('-messages')
+      .sort({ lastMessageAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return { conversations };
   });
 
   // Get patient context for a conversation
@@ -251,5 +300,59 @@ export async function conversationRoutes(app: FastifyInstance) {
 
     if (!conversation) return reply.status(404).send({ error: 'Conversa não encontrada' });
     return conversation;
+  });
+
+  // Send manual message from attendant
+  app.post('/:id/send', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { text } = request.body as { text?: string };
+    const user = request.user;
+
+    if (!text || !text.trim()) {
+      return reply.status(400).send({ error: 'Mensagem não pode ser vazia' });
+    }
+
+    const conversation = await ConversationModel.findById(id);
+    if (!conversation) return reply.status(404).send({ error: 'Conversa não encontrada' });
+
+    if (conversation.isAiHandling) {
+      return reply.status(400).send({ error: 'Conversa está com a IA. Assuma antes de enviar.' });
+    }
+
+    // Add message to conversation history
+    conversation.messages.push({
+      sender: 'attendant',
+      text: text.trim(),
+      type: 'text',
+      deliveryStatus: 'pending',
+      timestamp: new Date(),
+    });
+    updateHumanResponseMetrics(conversation, new Date());
+    conversation.metrics.totalMessages += 1;
+    conversation.metrics.humanMessages += 1;
+    conversation.lastMessageAt = new Date();
+    await conversation.save();
+
+    // Enqueue message for delivery via UAZAPI
+    await messageSendQueue.add('send-manual', {
+      conversationId: id,
+      patientPhone: conversation.patientPhone,
+      text: text.trim(),
+    });
+
+    // Publish to dashboard WebSocket
+    await publishEvent('channel:conversations', {
+      type: 'message:sent',
+      payload: {
+        conversationId: id,
+        patientPhone: conversation.patientPhone,
+        text: text.trim(),
+        sender: 'human',
+        attendantName: user.email,
+      },
+      timestamp: new Date(),
+    });
+
+    return { status: 'queued', text: text.trim() };
   });
 }

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { db, schema } from '@irb/database';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
+import { normalizeScope, resolvePermissions } from '../lib/access-control.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.post('/login', async (request, reply) => {
@@ -17,7 +18,32 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Credenciais inválidas' });
     }
 
-    const token = app.jwt.sign({ userId: user.id, email: user.email, role: user.role || 'attendant' });
-    return { token, user: { id: user.id, name: user.name, email: user.email, role: user.role } };
+    const permissions = resolvePermissions({
+      role: user.role,
+      accessProfile: user.accessProfile,
+      permissionOverrides: user.permissionOverrides,
+    });
+    const scope = normalizeScope(user.accessScope);
+
+    const token = app.jwt.sign({
+      userId: user.id,
+      email: user.email,
+      role: user.role || 'attendant',
+      accessProfile: user.accessProfile || 'attendant_basic',
+      permissions,
+      scope,
+    });
+    return {
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        accessProfile: user.accessProfile || 'attendant_basic',
+        permissions,
+        scope,
+      },
+    };
   });
 }

@@ -6,6 +6,25 @@ import { QUEUE_NAMES } from '@irb/shared/constants';
 import { getKlingoExternalClient } from '../services/klingo-external-client.js';
 import { createHash } from 'crypto';
 
+// Klingo procedimento IDs for "CONSULTA" per specialty (from Klingo internal catalog)
+const CONSULTA_PROCEDURE_MAP: Record<string, number> = {
+  'cardiologia': 416,
+  'gastroenterologia': 1293,
+  'neurologia': 1312,
+  'reumatologia': 1314,
+  'dermatologia': 1317,
+  'odontologia': 1105,
+  'psiquiatria': 1345,
+  'ginecologia': 1290,
+  'ortopedia': 1301,
+  'urologia': 1339,
+  'oftalmologia': 1295,
+  'pneumologia': 1321,
+  'pediatria': 1327,
+  'endocrinologia': 1302,
+  'geriatria': 1343,
+};
+
 function buildGoogleCalendarUrl(params: {
   title: string;
   startDate: Date;
@@ -42,7 +61,7 @@ interface SlotWithSource {
   time: string;
   dateTime: string;
   source: 'klingo' | 'fallback';
-  klingoSlotId?: number;
+  klingoSlotId?: string | number;
 }
 
 function generateFallbackSlots(durationMinutes: number = 30): SlotWithSource[] {
@@ -116,47 +135,90 @@ export async function bookingRoutes(app: FastifyInstance) {
         const end = new Date(now);
         end.setDate(end.getDate() + 8);
 
-        // Find doctor CRM if specific doctor
-        let crm: string | undefined;
-        if (link.doctorId) {
-          const [doc] = await db.select({ crm: schema.doctors.crm })
-            .from(schema.doctors)
-            .where(eq(schema.doctors.id, link.doctorId))
-            .limit(1);
-          if (doc?.crm) crm = doc.crm;
-        }
-
         // Resolve specialty name to Klingo ID
         let especialidadeId: number | undefined;
+        let exameId: number | undefined;
         try {
-          const specResult = await klingoExt.getSpecialties();
-          const specs = Array.isArray(specResult.data) ? specResult.data : [];
-          const match = specs.find(s =>
+          const specResult = await klingoExt.getSpecialties() as any;
+          // API may return array directly or { data: [...] }
+          const specs = Array.isArray(specResult) ? specResult
+            : Array.isArray(specResult?.data) ? specResult.data : [];
+          const match = specs.find((s: any) =>
             s.nome && s.nome.toLowerCase().includes(link.specialty.toLowerCase())
           );
-          if (match) especialidadeId = match.id;
+          if (match) especialidadeId = match.id || match.codigo;
         } catch (specErr) {
           console.warn('[booking] Could not fetch specialties for mapping:', specErr);
         }
 
+        // Priority 1: Use CONSULTA procedure map (most bookings are consultations)
+        const specKey = link.specialty.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const mapKey = Object.keys(CONSULTA_PROCEDURE_MAP).find(k => specKey.includes(k));
+        if (mapKey) {
+          exameId = CONSULTA_PROCEDURE_MAP[mapKey];
+        }
+
+        // Priority 2: Search Klingo exams API if no consulta match
+        if (!exameId) {
+          try {
+            const examesResult = await klingoExt.getExams() as any;
+            const exames = Array.isArray(examesResult) ? examesResult
+              : Array.isArray(examesResult?.data) ? examesResult.data
+              : Array.isArray(examesResult?.exames) ? examesResult.exames : [];
+            const specName = link.specialty.toLowerCase();
+            const exameMatch = exames.find((e: any) => {
+              const esp = e.especialidade;
+              if (typeof esp === 'string') return esp.toLowerCase().includes(specName);
+              if (esp && typeof esp === 'object' && esp.nome) return esp.nome.toLowerCase().includes(specName);
+              return false;
+            });
+            if (exameMatch) exameId = exameMatch.id || exameMatch.codigo;
+          } catch (exameErr) {
+            console.warn('[booking] Could not fetch exams for mapping:', exameErr);
+          }
+        }
+
         const result = await klingoExt.getAvailableSlots({
           especialidade: especialidadeId,
+          exame: exameId,
+          plano: 1, // PARTICULAR (default)
           inicio: start.toISOString().split('T')[0],
           fim: end.toISOString().split('T')[0],
-          crm,
-        });
+        }) as any;
 
-        const extSlots = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+
+        // Klingo API returns { horarios: [{ data, profissional, horarios: {key: hora} }] }
+        const extSlots = Array.isArray(result.horarios) ? result.horarios
+          : Array.isArray(result.data) ? result.data
+          : Array.isArray(result) ? result : [];
         for (const s of extSlots) {
-          const slotDate = new Date(`${s.data}T${s.hora}:00-03:00`);
-          if (slotDate <= now) continue;
-          slots.push({
-            date: s.data,
-            time: s.hora,
-            dateTime: slotDate.toISOString(),
-            source: 'klingo',
-            klingoSlotId: s.id,
-          });
+          // Each slot group has a date and nested horarios dict
+          const slotHorarios = s.horarios;
+          if (slotHorarios && typeof slotHorarios === 'object' && !Array.isArray(slotHorarios)) {
+            // Nested format: { "key1": "14:00", "key2": "14:20" }
+            for (const [key, hora] of Object.entries(slotHorarios)) {
+              const slotDate = new Date(`${s.data}T${hora}:00-03:00`);
+              if (slotDate <= now) continue;
+              slots.push({
+                date: s.data,
+                time: hora as string,
+                dateTime: slotDate.toISOString(),
+                source: 'klingo',
+                klingoSlotId: key,
+              });
+            }
+          } else if (s.hora) {
+            // Flat format fallback: { data, hora }
+            const slotDate = new Date(`${s.data}T${s.hora}:00-03:00`);
+            if (slotDate <= now) continue;
+            slots.push({
+              date: s.data,
+              time: s.hora,
+              dateTime: slotDate.toISOString(),
+              source: 'klingo',
+              klingoSlotId: s.id,
+            });
+          }
         }
 
         // Deduplicate and limit
@@ -199,10 +261,10 @@ export async function bookingRoutes(app: FastifyInstance) {
   // POST /api/booking/:token/confirm - Confirm booking
   app.post<{
     Params: { token: string };
-    Body: { patientName: string; cpf?: string; birthDate?: string; email?: string; doctorId: string; slotDateTime: string; slotSource?: 'klingo' | 'fallback'; klingoSlotId?: number };
+    Body: { patientName: string; cpf?: string; birthDate?: string; email?: string; sexo?: 'M' | 'F'; doctorId: string; slotDateTime: string; slotSource?: 'klingo' | 'fallback'; klingoSlotId?: string | number };
   }>('/:token/confirm', async (request, reply) => {
     const { token } = request.params;
-    const { patientName, cpf, birthDate, doctorId, slotDateTime, slotSource, klingoSlotId } = request.body;
+    const { patientName, cpf, birthDate, email, doctorId, slotDateTime, slotSource, klingoSlotId, sexo } = request.body;
 
     if (!patientName || !slotDateTime) {
       return reply.status(400).send({ error: 'Nome e horário são obrigatórios' });
@@ -213,25 +275,130 @@ export async function bookingRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Horário inválido' });
     }
 
-    // Use a transaction for double-booking protection
+    // Helper: convert DD/MM/YYYY to yyyy-mm-dd
+    function toBirthDateISO(raw?: string): string | undefined {
+      if (!raw) return undefined;
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length !== 8) return raw;
+      return `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
+    }
+
+    // ── STEP 1: Validate link (quick read, no mutation) ──
+    const [link] = await db.select().from(schema.bookingLinks)
+      .where(eq(schema.bookingLinks.token, token))
+      .limit(1);
+
+    if (!link) return reply.status(404).send({ error: 'Link não encontrado' });
+    if (link.status !== 'pending') return reply.status(410).send({ error: 'Este link já foi utilizado' });
+    if (new Date(link.expiresAt) < new Date()) return reply.status(410).send({ error: 'Este link expirou' });
+
+    // ── STEP 2: Klingo — identify/register patient + reserve slot (BEFORE DB commit) ──
+    const klingoExt = getKlingoExternalClient();
+    const isKlingoSlot = slotSource === 'klingo' && klingoSlotId && klingoExt;
+    let klingoPatientId: number | undefined;
+    let klingoReservationId: string | undefined;
+    let klingoVoucherId: number | undefined;
+    let klingoSyncStatus: string = process.env.KLINGO_APP_TOKEN ? 'pending' : 'skipped';
+    let klingoSyncError: string | undefined;
+
+    if (isKlingoSlot) {
+      // 2a. Identify patient — CPF first, then phone
+      if (cpf) {
+        try {
+          const cpfResult = await klingoExt.identifyPatientByCpf(cpf);
+          const identifiedPatientId = klingoExt.extractPatientId(cpfResult);
+          if (identifiedPatientId) {
+            klingoPatientId = identifiedPatientId;
+            console.log(`[booking] Patient identified by CPF: klingo_id=${klingoPatientId}`);
+          }
+        } catch (cpfErr: any) {
+          console.warn(`[booking] CPF lookup failed (will try phone): ${cpfErr.message}`);
+        }
+      }
+
+      if (!klingoPatientId && link.patientPhone) {
+        try {
+          const cleanPhone = link.patientPhone.replace(/\D/g, '').replace(/^55/, '');
+          const phoneResult = await klingoExt.identifyPatientByPhone(cleanPhone);
+          const identifiedPatientId = klingoExt.extractPatientId(phoneResult);
+          if (identifiedPatientId) {
+            klingoPatientId = identifiedPatientId;
+            console.log(`[booking] Patient identified by phone: klingo_id=${klingoPatientId}`);
+          }
+        } catch (phoneErr: any) {
+          console.warn(`[booking] Phone lookup failed: ${phoneErr.message}`);
+        }
+      }
+
+      // 2b. Auto-register if not found
+      if (!klingoPatientId && cpf && birthDate && link.patientPhone) {
+        try {
+          const cleanPhone = link.patientPhone.replace(/\D/g, '').replace(/^55/, '');
+          const registerResult = await klingoExt.registerPatient({
+            paciente: {
+              nome: patientName,
+              sexo: sexo || 'M',
+              dt_nasc: toBirthDateISO(birthDate)!,
+              docs: { cpf: cpf.replace(/\D/g, '') },
+              contatos: {
+                celular: cleanPhone,
+                ...(email ? { email } : {}),
+              },
+            },
+          });
+          if (registerResult.data?.id) {
+            klingoPatientId = registerResult.data.id;
+            console.log(`[booking] Patient auto-registered in Klingo: id=${klingoPatientId}`);
+          }
+        } catch (regErr: any) {
+          console.warn(`[booking] Klingo patient registration failed: ${regErr.message}`);
+        }
+      }
+
+      // 2c. Reserve slot in Klingo (10-min hold)
+      if (klingoPatientId) {
+        try {
+          const reservation = await klingoExt.reserveSlot(klingoPatientId, {
+            id_horario: Number(klingoSlotId),
+            id_paciente: klingoPatientId,
+          });
+
+          if (reservation.data?.id) {
+            klingoReservationId = reservation.data.id;
+            console.log(`[booking] Klingo slot reserved: reservation=${klingoReservationId}`);
+          } else {
+            // Reservation returned but no ID — slot may be taken
+            klingoSyncStatus = 'failed';
+            klingoSyncError = 'Klingo reserveSlot returned no reservation ID';
+            return reply.status(409).send({ error: 'Este horário não está mais disponível no sistema. Escolha outro.' });
+          }
+        } catch (resErr: any) {
+          console.error(`[booking] Klingo reserveSlot failed: ${resErr.message}`);
+          // Slot is taken or unavailable — tell patient to pick another
+          return reply.status(409).send({ error: 'Este horário não está mais disponível. Por favor, escolha outro.' });
+        }
+      } else {
+        // Could not identify/register patient — will create appointment locally and notify team
+        klingoSyncStatus = 'failed';
+        klingoSyncError = 'Paciente nao identificado/registrado no Klingo';
+        console.warn(`[booking] Patient not found/registered in Klingo — proceeding with local-only appointment`);
+      }
+    }
+
+    // ── STEP 3: DB transaction — create patient + appointment + mark link as booked ──
+    const isFallback = slotSource === 'fallback';
     const result = await db.transaction(async (tx) => {
-      const [link] = await tx.select().from(schema.bookingLinks)
+      // Re-check link status inside transaction (concurrent protection)
+      const [freshLink] = await tx.select({ status: schema.bookingLinks.status })
+        .from(schema.bookingLinks)
         .where(eq(schema.bookingLinks.token, token))
         .limit(1);
 
-      if (!link) {
-        return { error: 'Link não encontrado', status: 404 };
-      }
-
-      if (link.status !== 'pending') {
+      if (!freshLink || freshLink.status !== 'pending') {
         return { error: 'Este link já foi utilizado', status: 410 };
       }
 
-      if (new Date(link.expiresAt) < new Date()) {
-        return { error: 'Este link expirou', status: 410 };
-      }
-
-      // Check for conflicting appointment at the same time + doctor
+      // Check for conflicting appointment at same time + doctor
       const slotEnd = new Date(slotDate);
       slotEnd.setMinutes(slotEnd.getMinutes() + 30);
 
@@ -251,7 +418,7 @@ export async function bookingRoutes(app: FastifyInstance) {
         }
       }
 
-      // Find or reference patient
+      // Find or create patient
       let patientId: string | undefined;
       if (link.patientPhone) {
         const [patient] = await tx.select().from(schema.patients)
@@ -260,38 +427,28 @@ export async function bookingRoutes(app: FastifyInstance) {
 
         if (patient) {
           patientId = patient.id;
-          // Update name, cpf, birthDate if not set
           const updates: Record<string, unknown> = { updatedAt: new Date() };
           if (!patient.name && patientName) updates.name = patientName;
           if (!patient.cpfHash && cpf) updates.cpfHash = createHash('sha256').update(cpf).digest('hex');
           if (!patient.birthDate && birthDate) {
-            // Convert DD/MM/YYYY to YYYY-MM-DD
-            const digits = birthDate.replace(/\D/g, '');
-            if (digits.length === 8) {
-              updates.birthDate = `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-            }
+            const iso = toBirthDateISO(birthDate);
+            if (iso) updates.birthDate = iso;
+          }
+          if (klingoPatientId && !patient.klingoPatientId) {
+            updates.klingoPatientId = klingoPatientId;
           }
           if (Object.keys(updates).length > 1) {
-            await tx.update(schema.patients)
-              .set(updates)
-              .where(eq(schema.patients.id, patient.id));
+            await tx.update(schema.patients).set(updates).where(eq(schema.patients.id, patient.id));
           }
         } else {
-          // Create patient
           const cpfHash = cpf ? createHash('sha256').update(cpf).digest('hex') : undefined;
-          let birthDateISO: string | undefined;
-          if (birthDate) {
-            const digits = birthDate.replace(/\D/g, '');
-            if (digits.length === 8) {
-              birthDateISO = `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-            }
-          }
           const [newPatient] = await tx.insert(schema.patients)
             .values({
               phone: link.patientPhone,
               name: patientName,
               cpfHash,
-              birthDate: birthDateISO,
+              birthDate: toBirthDateISO(birthDate),
+              klingoPatientId: klingoPatientId || undefined,
               source: 'booking_link',
             })
             .returning({ id: schema.patients.id });
@@ -299,8 +456,7 @@ export async function bookingRoutes(app: FastifyInstance) {
         }
       }
 
-      // Create appointment - pending_confirmation if slot came from fallback
-      const isFallback = slotSource === 'fallback';
+      // Create appointment with Klingo data already resolved
       const [appointment] = await tx.insert(schema.appointments).values({
         patientId,
         doctorId: doctorId || link.doctorId || undefined,
@@ -309,10 +465,12 @@ export async function bookingRoutes(app: FastifyInstance) {
         status: isFallback ? 'pending_confirmation' : 'scheduled',
         createdBy: 'booking_link',
         conversationMongoId: link.conversationMongoId || undefined,
-        klingoSyncStatus: process.env.KLINGO_APP_TOKEN ? 'pending' : 'skipped',
+        klingoSyncStatus,
+        klingoReservationId: klingoReservationId || undefined,
+        klingoSyncError: klingoSyncError || undefined,
       }).returning({ id: schema.appointments.id });
 
-      // Update booking link
+      // Mark link as booked
       await tx.update(schema.bookingLinks)
         .set({
           status: 'booked',
@@ -322,137 +480,119 @@ export async function bookingRoutes(app: FastifyInstance) {
         })
         .where(eq(schema.bookingLinks.id, link.id));
 
-      return {
-        success: true,
-        appointmentId: appointment.id,
-        link,
-      };
+      return { success: true, appointmentId: appointment.id };
     });
 
     if ('error' in result) {
+      // If we reserved a Klingo slot but DB failed, cancel the reservation
+      if (klingoReservationId && klingoExt) {
+        try {
+          if (klingoPatientId) {
+            await klingoExt.cancelReservation(klingoPatientId, klingoReservationId);
+          }
+          console.log(`[booking] Cancelled Klingo reservation ${klingoReservationId} after DB error`);
+        } catch (cancelErr: any) {
+          console.error(`[booking] Failed to cancel Klingo reservation: ${cancelErr.message}`);
+        }
+      }
       return reply.status(result.status as number).send({ error: result.error });
     }
 
-    // Reserve + confirm slot in Klingo via External API
-    const klingoExt = getKlingoExternalClient();
-    if (klingoExt && klingoSlotId && slotSource === 'klingo') {
+    // ── STEP 4: Klingo — confirm booking (convert reservation to voucher) ──
+    let klingoSynced = false;
+    if (klingoReservationId && klingoPatientId && klingoExt) {
       try {
-        // Identify patient in Klingo
-        let klingoPatientId: number | undefined;
+        const confirmation = await klingoExt.confirmBooking(klingoPatientId, {
+          id_reserva: klingoReservationId,
+          id_paciente: klingoPatientId,
+        });
 
-        if (cpf) {
-          const cpfResult = await klingoExt.identifyPatientByCpf(cpf);
-          if (cpfResult.data?.id_pessoa) {
-            klingoPatientId = cpfResult.data.id_pessoa;
-          }
-        }
+        klingoVoucherId = confirmation.data?.voucher_id;
+        await db.update(schema.appointments).set({
+          klingoSyncStatus: 'synced',
+          klingoVoucherId: klingoVoucherId ?? null,
+        }).where(eq(schema.appointments.id, result.appointmentId));
 
-        if (!klingoPatientId && result.link.patientPhone) {
-          const phoneResult = await klingoExt.identifyPatientByPhone(result.link.patientPhone);
-          if (phoneResult.data?.id_pessoa) {
-            klingoPatientId = phoneResult.data.id_pessoa;
-          }
-        }
-
-        if (klingoPatientId) {
-          // Reserve the slot
-          const reservation = await klingoExt.reserveSlot({
-            id_horario: klingoSlotId,
-            id_paciente: klingoPatientId,
-          });
-
-          if (reservation.data?.id) {
-            // Confirm the booking
-            const confirmation = await klingoExt.confirmBooking({
-              id_reserva: reservation.data.id,
-              id_paciente: klingoPatientId,
-            });
-
-            // Save Klingo IDs in appointment
-            await db.update(schema.appointments).set({
-              klingoSyncStatus: 'synced',
-              klingoVoucherId: confirmation.data?.voucher_id ?? null,
-              klingoReservationId: reservation.data.id,
-            }).where(eq(schema.appointments.id, result.appointmentId));
-
-            console.log(`[booking] Klingo reservation confirmed: voucher=${confirmation.data?.voucher_id}, reservation=${reservation.data.id}`);
-          }
-        } else {
-          console.warn(`[booking] Patient not found in Klingo (cpf=${cpf ? 'yes' : 'no'}, phone=${result.link.patientPhone}), sync skipped`);
-          await db.update(schema.appointments).set({
-            klingoSyncStatus: 'failed',
-            klingoSyncError: 'Patient not found in Klingo (no CPF/phone match)',
-          }).where(eq(schema.appointments.id, result.appointmentId));
-        }
-      } catch (err: any) {
-        console.error(`[booking] Klingo reservation error:`, err.message);
+        klingoSynced = true;
+        console.log(`[booking] Klingo booking confirmed: voucher=${klingoVoucherId}, reservation=${klingoReservationId}`);
+      } catch (confErr: any) {
+        console.error(`[booking] Klingo confirmBooking failed: ${confErr.message}`);
+        // Reservation is still valid (10-min hold) — notify team to confirm manually
         await db.update(schema.appointments).set({
           klingoSyncStatus: 'failed',
-          klingoSyncError: err.message,
+          klingoSyncError: `confirmBooking failed: ${confErr.message}`,
         }).where(eq(schema.appointments.id, result.appointmentId));
       }
     }
 
-    // Notify team if slot came from fallback (needs manual confirmation in Klingo)
-    if (slotSource === 'fallback' && result.link.patientPhone) {
+    // ── STEP 5: Notifications ──
+    const needsTeamNotify = isFallback || (isKlingoSlot && !klingoSynced);
+    if (needsTeamNotify && link.patientPhone) {
       const notifyPhone = process.env.TEAM_NOTIFY_PHONE;
       if (notifyPhone) {
+        const reason = isFallback
+          ? 'Slot FALLBACK (sem slot Klingo)'
+          : klingoSyncError || 'Klingo sync falhou';
         await messageSendQueue.add('send', {
-          conversationId: `team-fallback-${result.appointmentId}`,
+          conversationId: `team-notify-${result.appointmentId}`,
           patientPhone: notifyPhone,
-          text: `⚠️ Agendamento FALLBACK criado (sem slot Klingo):\n\nPaciente: ${patientName}\nData: ${slotDate.toLocaleDateString('pt-BR')}\nHorário: ${slotDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}\n\nPor favor, confirme manualmente no Klingo.`,
+          text: `⚠️ AGENDAMENTO precisa de acao manual:\n\n📋 ${reason}\n👤 Paciente: ${patientName}\n📱 Tel: ${link.patientPhone}\n🏥 ${link.specialty}\n📅 ${slotDate.toLocaleDateString('pt-BR')} as ${slotDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}\n${cpf ? `🆔 CPF: ${cpf}\n` : ''}${birthDate ? `🎂 Nasc: ${birthDate}\n` : ''}\nPor favor, verifique no Klingo e confirme o agendamento.`,
           instanceName: 'uazapi',
         }, { removeOnComplete: 100, removeOnFail: 500 });
       }
     }
 
-    // Enqueue WhatsApp confirmation message
-    if (result.link.patientPhone && result.link.conversationMongoId) {
+    // ── STEP 6: WhatsApp confirmation to patient ──
+    if (link.patientPhone && link.conversationMongoId) {
       const doctorInfo = doctorId
         ? await db.select({ name: schema.doctors.name, specialty: schema.doctors.specialty }).from(schema.doctors).where(eq(schema.doctors.id, doctorId)).limit(1)
         : [];
 
       const doctorName = doctorInfo[0]?.name || '';
-      const specialty = result.link.specialty;
+      const specialty = link.specialty;
       const dateFormatted = slotDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
       const timeFormatted = slotDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const firstName = patientName.split(' ')[0];
+      const clinicAddress = 'IRB Prime Care - Rua Boa Vista, 99 - 6º Andar, Centro - SP';
 
-      // Buscar info do serviço se existir
+      // Fetch service info once (fixes duplicate query)
       let serviceInfo = '';
-      if (result.link.serviceId) {
-        const [svc] = await db.select({ name: schema.services.name, priceCents: schema.services.priceCents, durationMinutes: schema.services.durationMinutes })
-          .from(schema.services)
-          .where(eq(schema.services.id, result.link.serviceId))
-          .limit(1);
+      let durationMin = 30;
+      if (link.serviceId) {
+        const [svc] = await db.select({
+          name: schema.services.name,
+          priceCents: schema.services.priceCents,
+          durationMinutes: schema.services.durationMinutes,
+        }).from(schema.services).where(eq(schema.services.id, link.serviceId)).limit(1);
         if (svc) {
-          const price = svc.priceCents ? `R$ ${(svc.priceCents / 100).toFixed(2).replace('.', ',')}` : null;
-          const duration = svc.durationMinutes ? `${svc.durationMinutes} minutos` : null;
-          if (price) serviceInfo += `\n\n💰 Valor: ${price}`;
-          if (duration) serviceInfo += `\n⏱ Duração: ${duration}`;
+          if (svc.priceCents) serviceInfo += `\n\n💰 Valor: R$ ${(svc.priceCents / 100).toFixed(2).replace('.', ',')}`;
+          if (svc.durationMinutes) {
+            serviceInfo += `\n⏱ Duração: ${svc.durationMinutes} minutos`;
+            durationMin = svc.durationMinutes;
+          }
         }
       }
 
-      const firstName = patientName.split(' ')[0];
-
-      const clinicAddress = 'IRB Prime Care - Rua Boa Vista, 99 - 6º Andar, Centro - SP';
-
-      const confirmText = `Aeee ${firstName}, ta tudo certo! Seu agendamento foi confirmado com sucesso! 🎉\n\n` +
-        `Olha so os detalhes:\n\n` +
-        `📋 ${specialty}${doctorName ? ` com ${doctorName}` : ''}\n` +
-        `📅 ${dateFormatted} as ${timeFormatted}\n` +
-        `📍 ${clinicAddress}` +
-        serviceInfo +
-        `\n\n` +
-        `Chega uns 10 minutinhos antes pra gente te receber com calma, ta bom? 😊`;
-
-      // Build Google Calendar link
-      let durationMin = 30; // default
-      if (result.link.serviceId) {
-        const [svcDur] = await db.select({ durationMinutes: schema.services.durationMinutes })
-          .from(schema.services)
-          .where(eq(schema.services.id, result.link.serviceId))
-          .limit(1);
-        if (svcDur?.durationMinutes) durationMin = svcDur.durationMinutes;
+      // Different message depending on whether Klingo confirmed or not
+      let confirmText: string;
+      if (klingoSynced || isFallback) {
+        confirmText = `Aeee ${firstName}, ta tudo certo! Seu agendamento foi confirmado com sucesso! 🎉\n\n` +
+          `Olha so os detalhes:\n\n` +
+          `📋 ${specialty}${doctorName ? ` com ${doctorName}` : ''}\n` +
+          `📅 ${dateFormatted} as ${timeFormatted}\n` +
+          `📍 ${clinicAddress}` +
+          serviceInfo +
+          `\n\n` +
+          `Chega uns 10 minutinhos antes pra gente te receber com calma, ta bom? 😊`;
+      } else {
+        // Klingo sync failed — tell patient it's being processed
+        confirmText = `Oi ${firstName}! Recebemos seu agendamento e estamos confirmando com a clinica. 📋\n\n` +
+          `📋 ${specialty}${doctorName ? ` com ${doctorName}` : ''}\n` +
+          `📅 ${dateFormatted} as ${timeFormatted}\n` +
+          `📍 ${clinicAddress}` +
+          serviceInfo +
+          `\n\n` +
+          `Nossa equipe vai confirmar e te avisar em breve! 😊`;
       }
 
       const calendarUrl = buildGoogleCalendarUrl({
@@ -463,25 +603,19 @@ export async function bookingRoutes(app: FastifyInstance) {
         description: `Consulta de ${specialty}${doctorName ? ` com ${doctorName}` : ''}.\n\nChegue 10 minutos antes.\n\nIRB Prime Care\nRua Boa Vista, 99 - 6º Andar\nCentro, São Paulo - SP`,
       });
 
-      // Store calendar URL in Redis for button click handler (7 days TTL)
       const calKey = `calendar_event:${result.appointmentId}`;
       await redis.set(calKey, calendarUrl, 'EX', 7 * 24 * 60 * 60);
 
-      // 1) Send confirmation text
       await messageSendQueue.add('send', {
-        conversationId: result.link.conversationMongoId,
-        patientPhone: result.link.patientPhone,
+        conversationId: link.conversationMongoId,
+        patientPhone: link.patientPhone,
         text: confirmText,
         instanceName: 'uazapi',
-      }, {
-        removeOnComplete: 100,
-        removeOnFail: 500,
-      });
+      }, { removeOnComplete: 100, removeOnFail: 500 });
 
-      // 2) Send interactive buttons after confirmation
       await messageSendQueue.add('send', {
-        conversationId: result.link.conversationMongoId,
-        patientPhone: result.link.patientPhone,
+        conversationId: link.conversationMongoId,
+        patientPhone: link.patientPhone,
         text: '',
         instanceName: 'uazapi',
         interactive: {
@@ -493,17 +627,14 @@ export async function bookingRoutes(app: FastifyInstance) {
           ],
           footerText: 'IRB Prime Care',
         },
-      }, {
-        delay: 3000, // 3s after confirmation text
-        removeOnComplete: 100,
-        removeOnFail: 500,
-      });
+      }, { delay: 3000, removeOnComplete: 100, removeOnFail: 500 });
     }
 
     return {
       success: true,
       appointmentId: result.appointmentId,
-      message: 'Agendamento confirmado!',
+      klingoSynced,
+      message: klingoSynced ? 'Agendamento confirmado!' : (isFallback ? 'Agendamento registrado, pendente de confirmação.' : 'Agendamento registrado, confirmação pendente no sistema.'),
     };
   });
 }

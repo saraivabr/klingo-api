@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, Settings, LogOut, CreditCard, DollarSign, Video, Calendar, Stethoscope, Receipt, FlaskConical, Pill, Activity, ChevronDown, ChevronRight, ArrowDownCircle, ArrowUpCircle, TrendingUp, Users } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Settings, LogOut, CreditCard, DollarSign, Video, Calendar, Stethoscope, Receipt, FlaskConical, Pill, Activity, ChevronDown, ChevronRight, ArrowDownCircle, ArrowUpCircle, TrendingUp, Users, ClipboardCheck, WalletCards, Building2, ShoppingCart } from 'lucide-react';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
 const ALL_NAV_ITEMS = [
-  { to: '/', icon: Activity, label: 'Jornadas' },
-  { to: '/conversations', icon: LayoutDashboard, label: 'Conversas' },
+  { to: '/', icon: Activity, label: 'Jornadas', key: 'journeys' },
+  { to: '/conversations', icon: LayoutDashboard, label: 'Conversas', key: 'conversations' },
   { to: '/teleconsulta', icon: Video, label: 'Teleconsulta' },
   { to: '/schedules', icon: Calendar, label: 'Agendas' },
   { to: '/opd', icon: Stethoscope, label: 'Consultas' },
@@ -13,33 +13,43 @@ const ALL_NAV_ITEMS = [
   { to: '/lab', icon: FlaskConical, label: 'Laboratório' },
   { to: '/pharmacy', icon: Pill, label: 'Farmácia' },
   { to: '/metrics', icon: BarChart3, label: 'Métricas' },
+  { to: '/pdv', icon: ShoppingCart, label: 'PDV Cobranca' },
   { to: '/subscriptions', icon: CreditCard, label: 'Assinaturas' },
   { to: '/users', icon: Users, label: 'Usuarios', adminOnly: true as const },
 ] as const;
 
-function getUserRole(): string {
+function getUserAccess(): { role: string; permissions: string[] } {
   try {
     const token = localStorage.getItem('token');
-    if (!token) return '';
+    if (!token) return { role: '', permissions: [] };
     const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.role || '';
-  } catch { return ''; }
+    return {
+      role: payload.role || '',
+      permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
+    };
+  } catch { return { role: '', permissions: [] }; }
 }
 
 const FINANCE_SUBITEMS = [
-  { to: '/finance', icon: DollarSign, label: 'Visão Geral' },
-  { to: '/finance/payable', icon: ArrowDownCircle, label: 'Contas a Pagar' },
-  { to: '/finance/receivable', icon: ArrowUpCircle, label: 'Contas a Receber' },
-  { to: '/finance/cashflow', icon: TrendingUp, label: 'Fluxo de Caixa' },
+  { to: '/finance', icon: DollarSign, label: 'Visão Geral', permission: 'finance.view' },
+  { to: '/finance/payable', icon: ArrowDownCircle, label: 'Contas a Pagar', permission: 'finance.payable.view' },
+  { to: '/finance/receivable', icon: ArrowUpCircle, label: 'Contas a Receber', permission: 'finance.receivable.view' },
+  { to: '/finance/daily', icon: ClipboardCheck, label: 'Pagamento Diário', permission: 'finance.daily.view' },
+  { to: '/finance/cashflow', icon: TrendingUp, label: 'Fluxo de Caixa', permission: 'finance.cashflow.view' },
+  { to: '/finance/reimbursements', icon: CreditCard, label: 'Reembolsos', permission: 'finance.reimbursements.view' },
+  { to: '/finance/orders', icon: WalletCards, label: 'Ordens de Pagamento', permission: 'finance.orders.view' },
+  { to: '/finance/cadastros', icon: Building2, label: 'Cadastros', permission: 'finance.cadastros.view' },
 ];
 
 export default function Sidebar() {
-  const { connected } = useWebSocket();
+  const { connected, unreadCount, resetUnread } = useWebSocket();
   const navigate = useNavigate();
   const location = useLocation();
   const [financeExpanded, setFinanceExpanded] = useState(location.pathname.startsWith('/finance'));
-  const userRole = getUserRole();
-  const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => !('adminOnly' in item && item.adminOnly) || userRole === 'admin');
+  const { role: userRole, permissions } = getUserAccess();
+  const canManageUsers = userRole === 'admin' || permissions.includes('users.manage');
+  const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => !('adminOnly' in item && item.adminOnly) || canManageUsers);
+  const visibleFinanceItems = FINANCE_SUBITEMS.filter((item) => userRole === 'admin' || permissions.includes(item.permission));
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -57,11 +67,14 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+        {NAV_ITEMS.map(({ to, icon: Icon, label, ...rest }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
+            onClick={() => {
+              if ('key' in rest && (rest as any).key === 'conversations') resetUnread();
+            }}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 isActive
@@ -71,7 +84,12 @@ export default function Sidebar() {
             }
           >
             <Icon size={18} />
-            {label}
+            <span className="flex-1">{label}</span>
+            {'key' in rest && (rest as any).key === 'conversations' && unreadCount > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1 animate-pulse">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
           </NavLink>
         ))}
 
@@ -94,7 +112,7 @@ export default function Sidebar() {
           
           {financeExpanded && (
             <div className="ml-4 mt-1 space-y-0.5">
-              {FINANCE_SUBITEMS.map(({ to, icon: Icon, label }) => (
+              {visibleFinanceItems.map(({ to, icon: Icon, label }) => (
                 <NavLink
                   key={to}
                   to={to}

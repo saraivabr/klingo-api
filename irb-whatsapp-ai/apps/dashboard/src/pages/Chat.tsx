@@ -78,7 +78,17 @@ export default function Chat() {
       {/* Manual input (only when human is handling) */}
       {!conversation.isAiHandling && conversation.status !== 'closed' && (
         <div className="bg-white border-t p-4">
-          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); /* TODO: send manual message via API */ setManualMessage(''); }}>
+          <form className="flex gap-2" onSubmit={async (e) => {
+              e.preventDefault();
+              if (!manualMessage.trim() || !id) return;
+              try {
+                await api.sendMessage(id, manualMessage.trim());
+                setManualMessage('');
+                load();
+              } catch (err) {
+                console.error('Erro ao enviar mensagem:', err);
+              }
+            }}>
             <input value={manualMessage} onChange={e => setManualMessage(e.target.value)} className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Digite sua mensagem..." />
             <button type="submit" className="bg-primary-600 text-white p-2.5 rounded-lg hover:bg-primary-700"><Send size={18} /></button>
           </form>

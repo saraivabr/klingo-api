@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
@@ -28,7 +29,9 @@ import { syncRoutes } from './routes/sync.js';
 import { accountsPayableRoutes } from './routes/accounts-payable.js';
 import { accountsReceivableRoutes } from './routes/accounts-receivable.js';
 import { cashFlowRoutes } from './routes/cash-flow.js';
+import { financeOpsRoutes } from './routes/finance-ops.js';
 import { userRoutes } from './routes/users.js';
+import { pdvRoutes } from './routes/pdv.js';
 import { websocketHandler } from './websocket/handler.js';
 
 const PORT = parseInt(process.env.API_PORT || '3001');
@@ -38,6 +41,11 @@ async function start() {
 
   // Plugins
   await app.register(cors, { origin: true });
+  await app.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+    allowList: ['127.0.0.1', '::1'],
+  });
   await app.register(jwt, { secret: process.env.JWT_SECRET || 'dev-secret-change-me' });
   await app.register(websocket);
   await app.register(fastifyStatic, {
@@ -50,12 +58,18 @@ async function start() {
   await connectMongo();
   app.log.info('MongoDB connected');
 
-  // Public routes
+  // Public routes (with specific rate limits)
   await app.register(authRoutes, { prefix: '/api/auth' });
-  await app.register(uazapiWebhookRoutes, { prefix: '/api/webhooks' });
-  await app.register(klingoWebhookRoutes, { prefix: '/api/webhooks' });
-  await app.register(bookingRoutes, { prefix: '/api/booking' });
-  await app.register(asaasWebhookRoutes, { prefix: '/api/webhooks' });
+  await app.register(async (scope) => {
+    scope.addHook('onRoute', (routeOptions) => { routeOptions.config = { ...routeOptions.config, rateLimit: { max: 300, timeWindow: '1 minute' } }; });
+    await scope.register(uazapiWebhookRoutes, { prefix: '/api/webhooks' });
+    await scope.register(klingoWebhookRoutes, { prefix: '/api/webhooks' });
+    await scope.register(asaasWebhookRoutes, { prefix: '/api/webhooks' });
+  });
+  await app.register(async (scope) => {
+    scope.addHook('onRoute', (routeOptions) => { routeOptions.config = { ...routeOptions.config, rateLimit: { max: 30, timeWindow: '1 minute' } }; });
+    await scope.register(bookingRoutes, { prefix: '/api/booking' });
+  });
   await app.register(teleconsultationRoutes, { prefix: '/api/teleconsultation' });
 
   // Protected routes
@@ -76,7 +90,9 @@ await app.register(opdRoutes, { prefix: '/api/opd' });
   await app.register(accountsPayableRoutes, { prefix: '/api/accounts-payable' });
   await app.register(accountsReceivableRoutes, { prefix: '/api/accounts-receivable' });
   await app.register(cashFlowRoutes, { prefix: '/api/cash-flow' });
+  await app.register(financeOpsRoutes, { prefix: '/api/finance-ops' });
   await app.register(userRoutes, { prefix: '/api/users' });
+  await app.register(pdvRoutes, { prefix: '/api/pdv' });
 
    // WebSocket
   await app.register(websocketHandler, { prefix: '/ws' });

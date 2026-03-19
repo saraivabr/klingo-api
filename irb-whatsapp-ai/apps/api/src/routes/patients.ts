@@ -36,40 +36,42 @@ export async function patientRoutes(app: FastifyInstance) {
     }
 
     try {
+      const mapPatient = (payload: unknown) => {
+        const patient = klingo.extractPatientRecord(payload);
+        if (!patient) return null;
+
+        const klingoId = klingo.extractPatientId(patient);
+        if (!klingoId) return null;
+
+        return {
+          klingoId,
+          name: patient.nome || patient.st_nome || '',
+          cpf: patient.docs?.cpf || patient.st_cpf || cpf || '',
+          phone: patient.contatos?.celular || patient.contatos?.telefone || patient.st_telefone || phone || '',
+          email: patient.contatos?.email || patient.st_email || '',
+          birthDate: patient.dt_nasc || patient.dt_nascimento || '',
+        };
+      };
+
       if (cpf) {
-        // identifyPatientByCpf returns the patient object directly (not wrapped in .data)
         const result = await klingo.identifyPatientByCpf(cpf.replace(/\D/g, ''));
-        const p = (result as any)?.data || result;
-        if (!p || (!p.nome && !p.st_nome)) {
+        const patient = mapPatient(result);
+        if (!patient) {
           return { found: false, patient: null };
         }
         return {
           found: true,
-          patient: {
-            klingoId: p.chave || p.id_pessoa,
-            name: p.nome || p.st_nome,
-            cpf: p.docs?.cpf || p.st_cpf || cpf,
-            phone: p.contatos?.celular || p.contatos?.telefone || p.st_telefone || '',
-            email: p.contatos?.email || p.st_email || '',
-            birthDate: p.dt_nasc || p.dt_nascimento || '',
-          },
+          patient,
         };
       } else if (phone) {
         const result = await klingo.identifyPatientByPhone(phone.replace(/\D/g, ''));
-        const p = (result as any)?.data || result;
-        if (!p || (!p.id_pessoa && !p.chave)) {
+        const patient = mapPatient(result);
+        if (!patient) {
           return { found: false, patient: null };
         }
         return {
           found: true,
-          patient: {
-            klingoId: p.chave || p.id_pessoa,
-            name: p.nome || p.st_nome,
-            cpf: p.docs?.cpf || p.st_cpf || '',
-            phone: p.contatos?.celular || p.st_telefone || phone,
-            email: p.contatos?.email || p.st_email || '',
-            birthDate: p.dt_nasc || p.dt_nascimento || '',
-          },
+          patient,
         };
       }
 

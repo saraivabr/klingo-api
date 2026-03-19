@@ -38,13 +38,22 @@ export const api = {
   getConversation: (id: string) => request<any>(`/conversations/${id}`),
 
   assignConversation: (id: string) =>
-    request<any>(`/conversations/${id}/assign`, { method: 'POST' }),
+    request<any>(`/conversations/${id}/assign`, { method: 'POST', body: '{}' }),
 
   releaseConversation: (id: string) =>
-    request<any>(`/conversations/${id}/release`, { method: 'POST' }),
+    request<any>(`/conversations/${id}/release`, { method: 'POST', body: '{}' }),
 
   closeConversation: (id: string) =>
-    request<any>(`/conversations/${id}/close`, { method: 'POST' }),
+    request<any>(`/conversations/${id}/close`, { method: 'POST', body: '{}' }),
+
+  sendMessage: (id: string, text: string) =>
+    request<{ status: string; text: string }>(`/conversations/${id}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+
+  searchConversations: (q: string) =>
+    request<{ conversations: any[] }>(`/conversations/search?q=${encodeURIComponent(q)}`),
 
   getPatientContext: (conversationId: string) =>
     request<import('../types/patient-context').PatientContext>(`/conversations/${conversationId}/context`),
@@ -214,6 +223,9 @@ export const api = {
 
   getPatients: (params?: { search?: string; page?: string; limit?: string }) =>
     request<{ patients: any[]; total: number }>(`/patients?${new URLSearchParams(params as any)}`),
+
+  getDoctors: (params?: { search?: string; isActive?: string }) =>
+    request<{ doctors: any[] }>(`/doctors?${new URLSearchParams(params as any)}`),
 
   // Pharmacy
   pharmacyGetMedicines: (params?: { categoryId?: string; search?: string; page?: string; limit?: string }) =>
@@ -471,6 +483,9 @@ export const api = {
     name: string;
     cnpj?: string;
     ansCode?: string;
+    contactName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
     paymentTermDays?: number;
   }) =>
     request<any>('/accounts-receivable/insurance-providers', { 
@@ -530,6 +545,40 @@ export const api = {
       body: JSON.stringify({ transactionIds }) 
     }),
 
+  previewStatementImport: (data: {
+    bankAccountId: string;
+    fileName: string;
+    rows: Array<{
+      date: string;
+      description: string;
+      amount: number;
+      balance?: number | null;
+      type?: 'credit' | 'debit' | null;
+      reference?: string | null;
+    }>;
+  }) =>
+    request<any>('/cash-flow/import-statement/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  applyStatementImport: (data: {
+    bankAccountId: string;
+    fileName: string;
+    rows: Array<{
+      date: string;
+      description: string;
+      amount: number;
+      balance?: number | null;
+      type?: 'credit' | 'debit' | null;
+      reference?: string | null;
+    }>;
+  }) =>
+    request<any>('/cash-flow/import-statement/apply', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   getCashFlowSnapshots: (params?: { from?: string; to?: string; costCenterId?: string; isProjected?: string }) =>
     request<{ snapshots: any[] }>(
       `/cash-flow/snapshots?${new URLSearchParams(params as any)}`
@@ -558,14 +607,104 @@ export const api = {
       })}`
     ),
 
+  // Finance Ops
+  getCreditCardPurchases: (params?: { status?: string; search?: string; page?: string; limit?: string }) =>
+    request<{ items: any[]; total: number; summary: any }>(
+      `/finance-ops/credit-card-purchases?${new URLSearchParams(params as any)}`
+    ),
+
+  getReimbursements: (params?: { status?: string; search?: string; page?: string; limit?: string }) =>
+    request<{ items: any[]; total: number; summary: any }>(
+      `/finance-ops/reimbursements?${new URLSearchParams(params as any)}`
+    ),
+
+  getReimbursementDetail: (id: string) =>
+    request<any>(`/finance-ops/reimbursements/${id}`),
+
+  getPaymentOrders: (params?: { status?: string; referenceMonth?: string; page?: string; limit?: string }) =>
+    request<{ items: any[]; total: number; monthlySummary: any[] }>(
+      `/finance-ops/payment-orders?${new URLSearchParams(params as any)}`
+    ),
+
+  // PDV (Ponto de Venda)
+  pdvSearchPatients: (q: string) =>
+    request<{ patients: any[] }>(`/pdv/patients/search?q=${encodeURIComponent(q)}`),
+
+  pdvGetCharges: (params?: { search?: string; categoryId?: string }) =>
+    request<{ charges: any[] }>(`/pdv/charges?${new URLSearchParams(params as any || {})}`),
+
+  pdvGetCategories: () =>
+    request<{ categories: any[] }>('/pdv/categories'),
+
+  pdvGetPlans: () =>
+    request<{ plans: any[] }>('/pdv/plans'),
+
+  pdvCreateCharge: (data: {
+    patientId: string;
+    items: Array<{ chargeId: string; quantity: number; unitPrice: number; name: string }>;
+    billingType: string;
+    discountPercent?: number;
+    installmentCount?: number;
+    cpf: string;
+    email?: string;
+  }) =>
+    request<any>('/pdv/create-charge', { method: 'POST', body: JSON.stringify(data) }),
+
+  pdvCreateSubscriptionCharge: (data: {
+    patientId: string;
+    planId: string;
+    billingType: string;
+    cpf: string;
+    email?: string;
+  }) =>
+    request<any>('/pdv/create-subscription-charge', { method: 'POST', body: JSON.stringify(data) }),
+
+  pdvGetPaymentStatus: (asaasPaymentId: string) =>
+    request<any>(`/pdv/payment-status/${asaasPaymentId}`),
+
+  pdvPayCreditCard: (asaasPaymentId: string, data: {
+    creditCard: { holderName: string; number: string; expiryMonth: string; expiryYear: string; ccv: string };
+    creditCardHolderInfo: { name: string; email: string; cpfCnpj: string; postalCode: string; addressNumber: string; phone: string };
+  }) =>
+    request<any>(`/pdv/pay-credit-card/${asaasPaymentId}`, { method: 'POST', body: JSON.stringify(data) }),
+
+  pdvGetRecent: (params?: { page?: string; limit?: string }) =>
+    request<{ bills: any[]; total: number }>(`/pdv/recent?${new URLSearchParams(params as any || {})}`),
+
   // Users
   getUsers: () =>
     request<{ users: any[] }>('/users'),
 
-  createUser: (data: { name: string; email: string; password: string; role?: string }) =>
+  getAccessModel: () =>
+    request<{ profiles: any[]; permissionGroups: Record<string, string[]>; allPermissions: string[]; costCenters: any[] }>('/users/access-model'),
+
+  createUser: (data: {
+    name: string;
+    email: string;
+    password: string;
+    role?: string;
+    department?: string;
+    jobTitle?: string;
+    managerName?: string;
+    accessProfile?: string;
+    permissionOverrides?: { allow?: string[]; deny?: string[] };
+    accessScope?: { allCostCenters?: boolean; costCenterIds?: string[]; units?: string[] };
+  }) =>
     request<any>('/users', { method: 'POST', body: JSON.stringify(data) }),
 
-  updateUser: (id: string, data: { name?: string; email?: string; role?: string; isActive?: boolean; password?: string }) =>
+  updateUser: (id: string, data: {
+    name?: string;
+    email?: string;
+    role?: string;
+    isActive?: boolean;
+    password?: string;
+    department?: string;
+    jobTitle?: string;
+    managerName?: string;
+    accessProfile?: string;
+    permissionOverrides?: { allow?: string[]; deny?: string[] };
+    accessScope?: { allCostCenters?: boolean; costCenterIds?: string[]; units?: string[] };
+  }) =>
     request<any>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   changeMyPassword: (currentPassword: string, newPassword: string) =>

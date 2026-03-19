@@ -20,7 +20,12 @@ import AppLayout from './components/layout/AppLayout';
 import AccountsPayable from './pages/AccountsPayable';
 import AccountsReceivable from './pages/AccountsReceivable';
 import CashFlow from './pages/CashFlow';
+import DailyPayments from './pages/DailyPayments';
+import Reimbursements from './pages/Reimbursements';
+import PaymentOrders from './pages/PaymentOrders';
+import FinanceCadastros from './pages/FinanceCadastros';
 import Users from './pages/Users';
+import PDV from './pages/PDV';
 
 function App() {
   const token = localStorage.getItem('token');
@@ -49,8 +54,13 @@ function App() {
          <Route path="/finance" element={<Finance />} />
          <Route path="/finance/payable" element={<AccountsPayable />} />
          <Route path="/finance/receivable" element={<AccountsReceivable />} />
+         <Route path="/finance/daily" element={<DailyPayments />} />
          <Route path="/finance/cashflow" element={<CashFlow />} />
+         <Route path="/finance/reimbursements" element={<Reimbursements />} />
+         <Route path="/finance/orders" element={<PaymentOrders />} />
+         <Route path="/finance/cadastros" element={<FinanceCadastros />} />
          <Route path="/teleconsulta" element={<Teleconsultation />} />
+         <Route path="/pdv" element={<PDV />} />
          <Route path="/users" element={<Users />} />
          <Route path="/settings" element={<Settings />} />
        </Route>
