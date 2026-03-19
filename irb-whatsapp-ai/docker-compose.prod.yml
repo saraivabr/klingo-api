@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -71,10 +69,10 @@ services:
       - KLINGO_APP_TOKEN=${KLINGO_APP_TOKEN}
       - KLINGO_EXTERNAL_BASE_URL=${KLINGO_EXTERNAL_BASE_URL:-https://api-externa.klingo.app}
       - IGS_BASE_URL=${IGS_BASE_URL:-https://prdapolobr.igs.teknosgroup.com/api-apolo/v1}
-      - IGS_SERVICE=${IGS_SERVICE}
-      - IGS_AUTH_KEY=${IGS_AUTH_KEY}
-      - IGS_USERNAME=${IGS_USERNAME}
-      - IGS_PASSWORD=${IGS_PASSWORD}
+      - IGS_SERVICE=${IGS_SERVICE:-}
+      - IGS_AUTH_KEY=${IGS_AUTH_KEY:-}
+      - IGS_USERNAME=${IGS_USERNAME:-}
+      - IGS_PASSWORD=${IGS_PASSWORD:-}
       - TELECONSULTA_BASE_URL=https://irb.saraiva.ai/consulta
       - TEAM_NOTIFY_PHONE=${TEAM_NOTIFY_PHONE:-5511975830146}
     depends_on:
