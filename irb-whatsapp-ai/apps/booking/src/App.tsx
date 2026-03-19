@@ -66,7 +66,7 @@ export default function App() {
       });
   }, [token]);
 
-  const handleSlotSelect = (slot: { dateTime: string; source?: 'klingo' | 'fallback'; klingoSlotId?: number }) => {
+  const handleSlotSelect = (slot: { dateTime: string; source?: 'klingo' | 'fallback'; klingoSlotId?: string | number }) => {
     setSelectedSlot(slot.dateTime);
     setSelectedSlotSource(slot.source);
     setSelectedKlingoSlotId(slot.klingoSlotId);
