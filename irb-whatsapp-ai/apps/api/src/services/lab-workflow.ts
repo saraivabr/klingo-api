@@ -478,12 +478,13 @@ export async function checkKlingoResults(klingoExamId: number): Promise<{
 
   try {
     const result = await klingoClient.getExamResult(klingoExamId);
-    
-    if (result.data?.disponivel) {
+    if (Array.isArray(result) && result.length > 0) {
       // Baixar PDF
       const pdfResponse = await klingoClient.getExamResultPdf(klingoExamId);
-      // TODO: Salvar PDF e retornar URL
-      return { available: true };
+      if (pdfResponse?.pdf_base64) {
+        // TODO: Salvar PDF e retornar URL
+        return { available: true };
+      }
     }
 
     return { available: false };

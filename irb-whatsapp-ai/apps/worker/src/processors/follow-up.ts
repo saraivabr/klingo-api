@@ -10,104 +10,232 @@ const redisConnection = {
 
 const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redisConnection });
 const followUpQueue = new Queue(QUEUE_NAMES.FOLLOW_UP, { connection: redisConnection });
+const FOLLOW_UP_TZ = process.env.FOLLOW_UP_TIMEZONE || 'America/Sao_Paulo';
+const FOLLOW_UP_QUIET_START = parseInt(process.env.FOLLOW_UP_QUIET_HOUR_START || '21', 10); // 21:00
+const FOLLOW_UP_QUIET_END = parseInt(process.env.FOLLOW_UP_QUIET_HOUR_END || '8', 10); // 08:00
 
 interface FollowUpJobData {
   conversationId: string;
   patientPhone: string;
   patientName: string | null;
   type: 'escape_phrase' | 'appointment_reminder' | 'post_appointment' | 'attention_recovery';
-  attempt?: number; // Para recuperador de atenção progressivo
-  lastContext?: string; // Contexto da última conversa
+  attempt?: number;
+  lastContext?: string;
+}
+
+interface InteractiveMessage {
+  type: 'buttons';
+  text: string;
+  buttons: Array<{ id: string; text: string }>;
+  footerText?: string;
+}
+
+function hourInTimeZone(date: Date): number {
+  return Number(new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    hour12: false,
+    timeZone: FOLLOW_UP_TZ,
+  }).format(date));
+}
+
+function isInQuietHours(date: Date): boolean {
+  const hour = hourInTimeZone(date);
+  if (FOLLOW_UP_QUIET_START === FOLLOW_UP_QUIET_END) return false;
+  // Overnight window (e.g., 21 -> 8)
+  if (FOLLOW_UP_QUIET_START > FOLLOW_UP_QUIET_END) {
+    return hour >= FOLLOW_UP_QUIET_START || hour < FOLLOW_UP_QUIET_END;
+  }
+  // Same-day window (e.g., 13 -> 17)
+  return hour >= FOLLOW_UP_QUIET_START && hour < FOLLOW_UP_QUIET_END;
+}
+
+function delayUntilOutsideQuietHours(from: Date): number {
+  // Brute-force minute scan keeps timezone math simple and robust.
+  for (let minutes = 1; minutes <= (24 * 60 + 5); minutes++) {
+    const candidate = new Date(from.getTime() + minutes * 60 * 1000);
+    if (!isInQuietHours(candidate)) return minutes * 60 * 1000;
+  }
+  return 60 * 60 * 1000; // fallback 1h
 }
 
 /**
- * 🔥 RECUPERADOR DE ATENÇÃO — Baseado no Sexy Canvas
- * 
- * Estratégia progressiva:
- * - Tentativa 1 (30min): CURIOSIDADE + PREGUIÇA — leve, gera interesse
- * - Tentativa 2 (4h): RECOMPENSA + SEGURANÇA — oferece algo, transmite confiança
- * - Tentativa 3 (24h): AMOR + IRA SUTIL — empatia + inimigo comum
- * - Tentativa 4 (48h): ÚLTIMA CHANCE — escassez + liberdade
+ * RECUPERADOR DE ATENCAO — Sistema progressivo com botoes interativos
+ *
+ * Cada tentativa tem: mensagem + botoes contextuais pra facilitar retorno
+ *
+ * Tentativa 1 (30min): CURIOSIDADE — leve, pergunta simples + botoes
+ * Tentativa 2 (4h): RECOMPENSA — oferece algo, transmite confianca + botoes
+ * Tentativa 3 (24h): EMPATIA — entende a correria + botoes
+ * Tentativa 4 (48h): DESPEDIDA — sem pressao, porta aberta
  */
 const ATTENTION_RECOVERY: Array<{
   delay: number;
-  messages: Array<(name: string | null, context?: string) => string>;
+  getMessage: (name: string | null, context?: string) => { text: string; interactive?: InteractiveMessage };
 }> = [
   {
-    // Tentativa 1: 30 minutos — CURIOSIDADE + PREGUIÇA
+    // Tentativa 1: 30 minutos — CURIOSIDADE
     delay: 30 * 60 * 1000,
-    messages: [
-      (name) => `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Lembrei de voce agora! Ficou alguma duvida? Em menos de 1 minuto a gente resolve`,
-      (name) => `Ei${name ? ` ${name}` : ''}! Passou rapido aqui 😊 Sabia que a maioria das pessoas desiste bem nessa hora? Voce nao e a maioria ne?`,
-      (name) => `Oi${name ? ` ${name}` : ''}! Julia da IRB 😊 To aqui ainda! Quer que eu te ajude a fechar isso rapidinho?`,
-    ],
+    getMessage: (name, context) => {
+      const greeting = name ? `Oi ${name}` : 'Oi';
+
+      if (context === 'agendamento') {
+        return {
+          text: `${greeting}! Julia aqui 😊 Vi que a gente tava vendo horarios. Quer que eu continue de onde paramos?`,
+          interactive: {
+            type: 'buttons',
+            text: `${greeting}! Julia aqui 😊 Vi que a gente tava vendo horarios. Quer que eu continue de onde paramos?`,
+            buttons: [
+              { id: 'sim_continuar', text: 'Sim, quero agendar' },
+              { id: 'outro_horario', text: 'Ver outros horarios' },
+              { id: 'depois', text: 'Depois eu volto' },
+            ],
+            footerText: 'IRB Prime Care',
+          },
+        };
+      }
+
+      if (context === 'precos') {
+        return {
+          text: `${greeting}! Julia aqui 😊 Ficou alguma duvida sobre os valores? Posso te ajudar!`,
+          interactive: {
+            type: 'buttons',
+            text: `${greeting}! Julia aqui 😊 Ficou alguma duvida sobre os valores? Posso te ajudar!`,
+            buttons: [
+              { id: 'agendar_agora', text: 'Quero agendar' },
+              { id: 'mais_info', text: 'Mais informacoes' },
+              { id: 'depois', text: 'Depois eu volto' },
+            ],
+            footerText: 'IRB Prime Care',
+          },
+        };
+      }
+
+      return {
+        text: `${greeting}! Julia aqui 😊 Ficou alguma duvida? Em menos de 1 minuto a gente resolve!`,
+        interactive: {
+          type: 'buttons',
+          text: `${greeting}! Julia aqui 😊 Ficou alguma duvida? Em menos de 1 minuto a gente resolve!`,
+          buttons: [
+            { id: 'agendar', text: 'Quero agendar' },
+            { id: 'duvida', text: 'Tenho uma duvida' },
+            { id: 'depois', text: 'Depois eu volto' },
+          ],
+          footerText: 'IRB Prime Care',
+        },
+      };
+    },
   },
   {
-    // Tentativa 2: 4 horas — RECOMPENSA + SEGURANÇA
+    // Tentativa 2: 4 horas — RECOMPENSA
     delay: 4 * 60 * 60 * 1000,
-    messages: [
-      (name) => `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Olha, lembrei que voce tinha interesse. O retorno e gratis em 30 dias, sabia? Assim voce aproveita o maximo`,
-      (name) => `Ei${name ? ` ${name}` : ''}! Passando pra te contar que nossos medicos sao referencia na area 😊 Muita gente vem por indicacao. Quer continuar de onde paramos?`,
-      (name) => `Oi${name ? ` ${name}` : ''}! Julia da IRB 😊 Nossos pacientes sempre falam que a melhor parte foi nao ter esperado mais. Bora resolver isso?`,
-    ],
+    getMessage: (name, context) => {
+      const greeting = name ? `Oi ${name}` : 'Oi';
+
+      if (context === 'agendamento') {
+        return {
+          text: `${greeting}! Julia da IRB 😊 Sabia que o retorno e gratis em 30 dias? Nossos pacientes adoram isso. Quer continuar o agendamento?`,
+          interactive: {
+            type: 'buttons',
+            text: `${greeting}! Julia da IRB 😊 Sabia que o retorno e gratis em 30 dias? Nossos pacientes adoram isso. Quer continuar o agendamento?`,
+            buttons: [
+              { id: 'sim_agendar', text: 'Sim, vamos agendar!' },
+              { id: 'saber_mais', text: 'Quero saber mais' },
+              { id: 'nao_obrigado', text: 'Nao, obrigado' },
+            ],
+            footerText: 'IRB Prime Care',
+          },
+        };
+      }
+
+      return {
+        text: `${greeting}! Julia da IRB 😊 Nossos medicos sao referencia na area e o atendimento e super acolhedor. Quer marcar?`,
+        interactive: {
+          type: 'buttons',
+          text: `${greeting}! Julia da IRB 😊 Nossos medicos sao referencia na area e o atendimento e super acolhedor. Quer marcar?`,
+          buttons: [
+            { id: 'sim_agendar', text: 'Sim, quero agendar' },
+            { id: 'saber_mais', text: 'Contar mais' },
+            { id: 'nao_obrigado', text: 'Nao, obrigado' },
+          ],
+          footerText: 'IRB Prime Care',
+        },
+      };
+    },
   },
   {
-    // Tentativa 3: 24 horas — AMOR + IRA SUTIL
+    // Tentativa 3: 24 horas — EMPATIA
     delay: 24 * 60 * 60 * 1000,
-    messages: [
-      (name) => `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Olha, eu sei como e a correria do dia a dia. Mas sabe o que e pior que nao ter tempo? Ficar com aquela preocupacao na cabeca. Me conta, posso te ajudar?`,
-      (name) => `Ei${name ? ` ${name}` : ''}! Nada de fila de convenio aqui ta? 😊 Voce escolhe o horario e pronto. Vamos marcar?`,
-      (name) => `Oi${name ? ` ${name}` : ''}! To pensando aqui... as vezes a gente deixa pra depois e quando ve, o pequeno problema virou grande. Bora cuidar disso agora que e simples?`,
-    ],
+    getMessage: (name) => {
+      const greeting = name ? `Oi ${name}` : 'Oi';
+      return {
+        text: `${greeting}! Julia aqui 😊 Sei como e a correria do dia a dia. Mas cuidar da saude e importante. Quando quiser, to aqui pra ajudar!`,
+        interactive: {
+          type: 'buttons',
+          text: `${greeting}! Julia aqui 😊 Sei como e a correria do dia a dia. Mas cuidar da saude e importante. Quando quiser, to aqui pra ajudar!`,
+          buttons: [
+            { id: 'agendar_agora', text: 'Vamos agendar!' },
+            { id: 'lembrar_amanha', text: 'Me lembra amanha' },
+            { id: 'nao_preciso', text: 'Nao preciso agora' },
+          ],
+          footerText: 'IRB Prime Care',
+        },
+      };
+    },
   },
   {
-    // Tentativa 4: 48 horas — ÚLTIMA CHANCE (escassez + liberdade)
+    // Tentativa 4: 48 horas — DESPEDIDA (sem botoes, mais leve)
     delay: 48 * 60 * 60 * 1000,
-    messages: [
-      (name) => `Oi${name ? ` ${name}` : ''}! Julia aqui pela ultima vez 😊 Sem pressao nenhuma ta? So queria te lembrar que quando voce quiser, e so me chamar. Cuida de voce! ❤️`,
-      (name) => `Ei${name ? ` ${name}` : ''}! Ultima mensagem, prometo 😊 Se um dia decidir cuidar disso, me chama. Vou adorar te ajudar. Ate mais! ❤️`,
-      (name) => `Oi${name ? ` ${name}` : ''}! Vou parar de te incomodar 😊 Mas fica o convite: quando quiser resolver, to aqui. Um abraco e se cuida! ❤️`,
-    ],
+    getMessage: (name) => {
+      const greeting = name ? `Oi ${name}` : 'Oi';
+      return {
+        text: `${greeting}! Julia aqui pela ultima vez 😊 Sem pressao nenhuma! Quando quiser cuidar da saude, e so me chamar. Cuida de voce! ❤️`,
+      };
+    },
   },
 ];
 
-// Múltiplas variantes por tipo — rotaciona pra nunca repetir a mesma mensagem
-const FOLLOW_UP_VARIANTS: Record<string, Array<(name: string | null) => string>> = {
-  escape_phrase: [
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia da IRB aqui 😊 Fiquei pensando em voce. Sabe aquela sensacao de resolver algo que ta te incomodando? Imagina como vai ser bom. Me conta, quer retomar?`,
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia aqui 😊 Sabia que a maioria dos nossos pacientes fala que o mais dificil foi dar o primeiro passo? Voce ja deu! Vamos continuar de onde paramos?`,
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Aqui e a Julia da IRB 😊 Te confesso que fiquei pensando no seu caso. Cada dia que passa sem cuidar e um dia a menos se sentindo bem. Bora resolver isso?`,
-  ],
-  appointment_reminder: [
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia da IRB aqui 😊 Amanha e o grande dia! Nossos pacientes sempre falam que saem da consulta com aquela sensacao de alivio. Voce vai adorar! Chega uns 10 minutinhos antes ta?`,
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia aqui 😊 So passando pra te lembrar da sua consulta amanha. Voce tomou uma decisao inteligente e amanha vai sentir isso na pratica. Te esperamos!`,
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia da IRB 😊 Amanha tem consulta! Chega um pouquinho antes pra gente te receber com calma. O pessoal da recepcao e um amor, voce vai se sentir em casa ❤️`,
-  ],
-  post_appointment: [
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia da IRB aqui 😊 E ai, como foi a consulta? Me conta tudo! Adoro saber que nossos pacientes saem daqui mais tranquilos`,
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia aqui 😊 Fiquei curiosa pra saber como foi sua consulta! Os pacientes sempre me falam que valeu muito a pena. Foi assim pra voce tambem?`,
-    (name) =>
-      `Oi${name ? `, ${name}` : ''}! Julia da IRB 😊 Passou a consulta e eu fiquei aqui torcendo pra ter ido tudo bem! Me conta como foi? Se precisar de qualquer coisa, to aqui ❤️`,
-  ],
-};
-
-const FOLLOW_UP_MESSAGES: Record<string, (name: string | null) => string> = Object.fromEntries(
-  Object.entries(FOLLOW_UP_VARIANTS).map(([type, variants]) => [
-    type,
-    (name: string | null) => {
-      const index = Math.floor(Math.random() * variants.length);
-      return variants[index](name);
+// Mensagens de follow-up para outros tipos (com botoes)
+const FOLLOW_UP_MESSAGES: Record<string, (name: string | null) => { text: string; interactive?: InteractiveMessage }> = {
+  escape_phrase: (name) => ({
+    text: `Oi${name ? ` ${name}` : ''}! Julia da IRB aqui 😊 Fiquei pensando em voce. Quer retomar de onde paramos?`,
+    interactive: {
+      type: 'buttons',
+      text: `Oi${name ? ` ${name}` : ''}! Julia da IRB aqui 😊 Fiquei pensando em voce. Quer retomar de onde paramos?`,
+      buttons: [
+        { id: 'sim_retomar', text: 'Sim, vamos!' },
+        { id: 'atendente', text: 'Falar com alguem' },
+        { id: 'nao', text: 'Nao, obrigado' },
+      ],
+      footerText: 'IRB Prime Care',
     },
-  ]),
-);
+  }),
+  appointment_reminder: (name) => ({
+    text: `Oi${name ? ` ${name}` : ''}! Julia da IRB 😊 Amanha tem consulta! Chega uns 10 minutinhos antes ta? Te esperamos!`,
+    interactive: {
+      type: 'buttons',
+      text: `Oi${name ? ` ${name}` : ''}! Julia da IRB 😊 Amanha tem consulta! Chega uns 10 minutinhos antes ta? Te esperamos!`,
+      buttons: [
+        { id: 'confirmar', text: 'Confirmado!' },
+        { id: 'remarcar', text: 'Preciso remarcar' },
+        { id: 'como_chegar', text: 'Como chegar?' },
+      ],
+      footerText: 'IRB Prime Care',
+    },
+  }),
+  post_appointment: (name) => ({
+    text: `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Como foi a consulta? Me conta!`,
+    interactive: {
+      type: 'buttons',
+      text: `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Como foi a consulta? Me conta!`,
+      buttons: [
+        { id: 'otima', text: 'Foi otima!' },
+        { id: 'duvida_pos', text: 'Tenho uma duvida' },
+        { id: 'remarcar', text: 'Agendar retorno' },
+      ],
+      footerText: 'IRB Prime Care',
+    },
+  }),
+};
 
 export async function processFollowUp(job: Job<FollowUpJobData>) {
   const { conversationId, patientPhone, patientName, type, attempt = 1, lastContext } = job.data;
@@ -118,8 +246,8 @@ export async function processFollowUp(job: Job<FollowUpJobData>) {
 
   // Don't send follow-up if conversation was already continued or closed
   const lastMsg = conversation.messages[conversation.messages.length - 1];
-  
-  // Se paciente respondeu depois do último follow-up, não envia mais
+
+  // Se paciente respondeu depois do ultimo follow-up, nao envia mais
   if (lastMsg && lastMsg.sender === 'patient') {
     const lastPatientMsgTime = new Date(lastMsg.timestamp).getTime();
     const jobCreatedTime = job.timestamp;
@@ -127,45 +255,85 @@ export async function processFollowUp(job: Job<FollowUpJobData>) {
       return { status: 'skipped', reason: 'patient already responded' };
     }
   }
-  
+
   if (conversation.status === 'closed') {
     return { status: 'skipped', reason: 'conversation closed' };
   }
 
-  let text: string;
+  // Se conversa nao esta mais com IA, nao envia follow-up automatico
+  if (!conversation.isAiHandling) {
+    return { status: 'skipped', reason: 'not ai handling' };
+  }
+
+  // Auto-close path should not send any additional message.
+  if (type === 'attention_recovery' && attempt > ATTENTION_RECOVERY.length && lastContext === 'auto_close') {
+    const freshConv = await ConversationModel.findById(conversationId);
+    if (freshConv && freshConv.status !== 'closed') {
+      const lastPatientMsg = [...freshConv.messages].reverse().find(m => m.sender === 'patient');
+      const lastAiMsg = [...freshConv.messages].reverse().find(m => m.sender === 'ai');
+
+      if (!lastPatientMsg || (lastAiMsg && new Date(lastPatientMsg.timestamp) < new Date(lastAiMsg.timestamp))) {
+        freshConv.status = 'closed';
+        freshConv.closedAt = new Date();
+        freshConv.summary = (freshConv.summary || '') + '\n[Auto-fechada por inatividade apos 4 tentativas de follow-up]';
+        await freshConv.save();
+        console.log(`[ATTENTION-RECOVERY] Auto-closed conversation ${conversationId} for ${patientPhone}`);
+        return { status: 'auto_closed' };
+      }
+    }
+    return { status: 'skipped', reason: 'patient responded or already closed' };
+  }
+
+  // Never send proactive follow-up during quiet hours; postpone same attempt.
+  const now = new Date();
+  if (isInQuietHours(now)) {
+    const postponeMs = delayUntilOutsideQuietHours(now);
+    await followUpQueue.add('follow-up', {
+      conversationId,
+      patientPhone,
+      patientName,
+      type,
+      attempt,
+      lastContext,
+    }, {
+      delay: postponeMs,
+      removeOnComplete: 50,
+      removeOnFail: 100,
+    });
+    return { status: 'postponed_quiet_hours', delayMs: postponeMs };
+  }
+
+  let messageData: { text: string; interactive?: InteractiveMessage };
   let nextAttempt: number | null = null;
 
-  // 🔥 RECUPERADOR DE ATENÇÃO — Sistema progressivo
+  // RECUPERADOR DE ATENCAO — Sistema progressivo
   if (type === 'attention_recovery') {
     const attemptIndex = Math.min(attempt - 1, ATTENTION_RECOVERY.length - 1);
     const recoveryConfig = ATTENTION_RECOVERY[attemptIndex];
-    
+
     if (!recoveryConfig) {
       return { status: 'skipped', reason: 'no more recovery attempts' };
     }
 
-    // Seleciona mensagem aleatória desta tentativa
-    const messages = recoveryConfig.messages;
-    const randomIndex = Math.floor(Math.random() * messages.length);
-    text = messages[randomIndex](patientName, lastContext);
+    messageData = recoveryConfig.getMessage(patientName, lastContext);
 
-    // Agenda próxima tentativa se houver
+    // Agenda proxima tentativa se houver
     if (attempt < ATTENTION_RECOVERY.length) {
       nextAttempt = attempt + 1;
     }
 
-    console.log(`[ATTENTION-RECOVERY] Attempt ${attempt}/${ATTENTION_RECOVERY.length} for ${patientPhone}`);
+    console.log(`[ATTENTION-RECOVERY] Attempt ${attempt}/${ATTENTION_RECOVERY.length} for ${patientPhone} (context: ${lastContext})`);
   } else {
     // Follow-up normal (escape_phrase, appointment_reminder, etc)
     const messageTemplate = FOLLOW_UP_MESSAGES[type];
     if (!messageTemplate) return { status: 'skipped', reason: 'unknown follow-up type' };
-    text = messageTemplate(patientName);
+    messageData = messageTemplate(patientName);
   }
 
-  // Add system message to conversation
+  // Add AI message to conversation
   conversation.messages.push({
     sender: 'ai',
-    text,
+    text: messageData.text,
     type: 'text',
     deliveryStatus: 'pending',
     timestamp: new Date(),
@@ -173,18 +341,24 @@ export async function processFollowUp(job: Job<FollowUpJobData>) {
   conversation.lastMessageAt = new Date();
   await conversation.save();
 
-  // Enqueue to send
-  await messageSendQueue.add('send', {
+  // Enqueue to send (with interactive buttons if available)
+  const sendData: any = {
     conversationId,
     patientPhone,
-    text,
+    text: messageData.text,
     instanceName: conversation.instanceName,
-  }, {
+  };
+
+  if (messageData.interactive) {
+    sendData.interactive = messageData.interactive;
+  }
+
+  await messageSendQueue.add('send', sendData, {
     removeOnComplete: 50,
     removeOnFail: 100,
   });
 
-  // 🔥 Agenda próxima tentativa de recuperação se aplicável
+  // Agenda proxima tentativa de recuperacao se aplicavel
   if (type === 'attention_recovery' && nextAttempt !== null && nextAttempt <= ATTENTION_RECOVERY.length) {
     const nextConfig = ATTENTION_RECOVERY[nextAttempt - 1];
     if (nextConfig) {
@@ -198,17 +372,34 @@ export async function processFollowUp(job: Job<FollowUpJobData>) {
       }, {
         delay: nextConfig.delay,
         removeOnComplete: 50,
+        jobId: `attention_recovery_${conversationId}_${nextAttempt}`,
       });
-      console.log(`[ATTENTION-RECOVERY] Scheduled attempt ${nextAttempt} in ${nextConfig.delay / 1000 / 60} minutes`);
+      console.log(`[ATTENTION-RECOVERY] Scheduled attempt ${nextAttempt} in ${Math.round(nextConfig.delay / 1000 / 60)}min`);
     }
+  }
+
+  // Na tentativa 4 (ultima), fechar conversa automaticamente se nao respondeu
+  if (type === 'attention_recovery' && attempt >= ATTENTION_RECOVERY.length) {
+    // Agendar fechamento em 24h se nao responder
+    await followUpQueue.add('follow-up', {
+      conversationId,
+      patientPhone,
+      patientName,
+      type: 'attention_recovery',
+      attempt: ATTENTION_RECOVERY.length + 1, // Sinaliza fechamento
+      lastContext: 'auto_close',
+    }, {
+      delay: 24 * 60 * 60 * 1000,
+      removeOnComplete: 50,
+      jobId: `auto_close_${conversationId}`,
+    });
   }
 
   return { status: 'sent', type, attempt: type === 'attention_recovery' ? attempt : undefined };
 }
 
 /**
- * 🔥 Inicia o recuperador de atenção para uma conversa
- * Chamado quando detectamos que o paciente parou de responder
+ * Inicia o recuperador de atencao para uma conversa
  */
 export async function startAttentionRecovery(
   conversationId: string,
@@ -217,7 +408,7 @@ export async function startAttentionRecovery(
   lastContext?: string,
 ) {
   const firstAttempt = ATTENTION_RECOVERY[0];
-  
+
   await followUpQueue.add('follow-up', {
     conversationId,
     patientPhone,
@@ -228,7 +419,8 @@ export async function startAttentionRecovery(
   }, {
     delay: firstAttempt.delay,
     removeOnComplete: 50,
+    jobId: `attention_recovery_${conversationId}_1`,
   });
 
-  console.log(`[ATTENTION-RECOVERY] Started for ${patientPhone}, first attempt in ${firstAttempt.delay / 1000 / 60} minutes`);
+  console.log(`[ATTENTION-RECOVERY] Started for ${patientPhone}, first attempt in ${firstAttempt.delay / 1000 / 60}min (context: ${lastContext})`);
 }

@@ -11,6 +11,7 @@ interface DoctorInfo {
 
 interface ConversationDoc {
   messages: Array<{ sender: string; text: string }>;
+  summary?: string;
   [key: string]: unknown;
 }
 
@@ -38,6 +39,11 @@ export function buildContext(params: {
       return parts.join(' - ');
     }).join('\n');
     systemPrompt += `\n\nMEDICOS ATIVOS DA IRB (use para recomendar por nome):\n${doctorLines}\n\nQuando o paciente perguntar sobre medicos ou especialidades, recomende pelo nome com entusiasmo pessoal. Ex: "O Dr. Fulano e incrivel, referencia na area!"`;
+  }
+
+  // Inject previous conversation context if this is a returning patient
+  if (conversation.summary && conversation.summary.startsWith('[CONTEXTO ANTERIOR')) {
+    systemPrompt += `\n\n${conversation.summary}\nUse este contexto para personalizar o atendimento. Exemplo: "Que bom te ver de volta!" ou mencionar o que foi tratado antes.`;
   }
 
   // Adicionar hints contextuais baseado no estado da conversa

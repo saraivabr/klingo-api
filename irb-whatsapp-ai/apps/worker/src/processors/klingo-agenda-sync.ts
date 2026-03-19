@@ -26,46 +26,75 @@ export async function processKlingoAgendaSync(job: Job<KlingoAgendaSyncData>) {
 
     let appointmentsCount = 0;
     let doctorsCount = 0;
+    const now = new Date();
+    const brtNow = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const todayStr = brtNow.toISOString().split('T')[0];
 
     // Full sync includes doctors
     if (syncType === 'full') {
-      const profResponse = await client.getProfessionals();
-      if (profResponse.success && profResponse.data) {
-        const profs = Array.isArray(profResponse.data)
-          ? profResponse.data
-          : [profResponse.data];
-        for (const prof of profs) {
-          try {
-            const [existing] = await db
-              .select()
-              .from(schema.doctors)
-              .where(eq(schema.doctors.klingoId, prof.id))
-              .limit(1);
+      let profs: Array<{ id: number; nome: string; especialidade?: string; crm?: string }> = [];
+      try {
+        const profResponse = await client.getProfessionals();
+        if (profResponse.success && profResponse.data) {
+          profs = Array.isArray(profResponse.data)
+            ? profResponse.data
+            : [profResponse.data];
+        }
+      } catch (err) {
+        console.warn('[klingo-agenda-sync] getProfessionals fallback engaged:', (err as Error).message);
+      }
 
-            if (!existing) {
-              await db.insert(schema.doctors).values({
-                klingoId: prof.id,
-                name: prof.nome,
-                specialty: prof.especialidade,
-                crm: prof.crm,
-              });
-              doctorsCount++;
-            }
-          } catch (err) {
-            console.warn(
-              `[klingo-agenda-sync] Failed to sync doctor ${prof.id}:`,
-              (err as Error).message
-            );
+      if (profs.length === 0) {
+        const fallbackResponse = await client.listForConfirmation(todayStr, { links: false });
+        const fallbackAppointments = fallbackResponse.success && fallbackResponse.data
+          ? (Array.isArray(fallbackResponse.data) ? fallbackResponse.data : [fallbackResponse.data])
+          : [];
+
+        const uniqueDoctors = new Map<number, { id: number; nome: string; especialidade?: string; crm?: string }>();
+        for (const apt of fallbackAppointments) {
+          const doctorId = Number((apt as any).medico_id);
+          const doctorName = (apt as any).profissional || (apt as any).medico;
+          if (!Number.isFinite(doctorId) || doctorId <= 0 || !doctorName) continue;
+          if (!uniqueDoctors.has(doctorId)) {
+            uniqueDoctors.set(doctorId, {
+              id: doctorId,
+              nome: doctorName,
+              especialidade: apt.especialidade,
+              crm: (apt as any).crm_medico || (apt as any).crm,
+            });
           }
+        }
+
+        profs = [...uniqueDoctors.values()];
+      }
+
+      for (const prof of profs) {
+        try {
+          const [existing] = await db
+            .select()
+            .from(schema.doctors)
+            .where(eq(schema.doctors.klingoId, prof.id))
+            .limit(1);
+
+          if (!existing) {
+            await db.insert(schema.doctors).values({
+              klingoId: prof.id,
+              name: prof.nome,
+              specialty: prof.especialidade,
+              crm: prof.crm,
+            });
+            doctorsCount++;
+          }
+        } catch (err) {
+          console.warn(
+            `[klingo-agenda-sync] Failed to sync doctor ${prof.id}:`,
+            (err as Error).message
+          );
         }
       }
     }
 
     // Light or full sync: appointments
-    const now = new Date();
-    const brtNow = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-    const todayStr = brtNow.toISOString().split('T')[0];
-
     const aptResponse = await client.listForConfirmation(todayStr, { links: false });
     if (aptResponse.success && aptResponse.data) {
       const apts = Array.isArray(aptResponse.data)
@@ -183,5 +212,3 @@ export async function processKlingoAgendaSync(job: Job<KlingoAgendaSyncData>) {
     throw err;
   }
 }
-
-

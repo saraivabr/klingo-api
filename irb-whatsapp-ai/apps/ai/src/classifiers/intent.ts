@@ -12,6 +12,8 @@ export type Intent =
   | 'complaint'
   | 'medical_urgency'
   | 'human_request'
+  | 'technical_support'
+  | 'out_of_scope'
   | 'follow_up'
   | 'gratitude'
   | 'farewell'
@@ -30,6 +32,8 @@ const INTENT_PATTERNS: [Intent, RegExp[]][] = [
   ['complaint', [/\b(reclamação|reclamacao|reclamar|insatisfeito|péssimo|pessimo|horrível|horrivel|absurdo)\b/i]],
   ['medical_urgency', [/\b(urgente|urgência|urgencia|emergência|emergencia|dor forte|sangramento|passando mal)\b/i]],
   ['human_request', [/\b(pessoa|humano|atendente|falar com alguém|falar com alguem|ser humano|gente de verdade)\b/i]],
+  ['technical_support', [/\b(login|senha|autentica[cç][aã]o|autenticacao|token|api|erro 401|erro 403|erro 500|sistema|aplicativo|app|site|portal|acesso|bug|travou|whatsapp web)\b/i]],
+  ['out_of_scope', [/\b(programa[cç][aã]o|c[oó]digo|deploy|servidor|docker|redis|mongodb|postgres|ssh|dns|dom[ií]nio|n8n|integra[cç][aã]o|integração t[eé]cnica)\b/i]],
   ['gratitude', [/\b(obrigad[oa]|valeu|agradeço|agradeco|thanks)\b/i]],
   ['farewell', [/\b(tchau|até mais|ate mais|bye|falou|vlw)\b/i]],
 ];

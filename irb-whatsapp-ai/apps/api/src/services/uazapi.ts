@@ -12,8 +12,8 @@
  * - /message/react - Enviar reação
  */
 
-const UAZAPI_URL = process.env.UAZAPI_URL || 'https://saraiva.uazapi.com';
-const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || '';
+const UAZAPI_URL = process.env.UAZAPI_URL || process.env.EVOLUTION_API_URL || 'https://saraiva.uazapi.com';
+const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || process.env.EVOLUTION_API_KEY || '';
 
 // ============================================================================
 // Types

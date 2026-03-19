@@ -1,6 +1,5 @@
 /**
  * Klingo External API Client
- * Uses X-APP-TOKEN authentication (no login/expiry management needed).
  * Base URL: https://api-externa.klingo.app
  */
 
@@ -18,14 +17,19 @@ import type {
   KlingoReserveSlotRequest,
   KlingoConfirmBookingRequest,
   KlingoBookingConfirmation,
-  KlingoVoucher,
   KlingoTelefoniaAppointment,
   KlingoConfirmAppointmentRequest,
   KlingoNpsRequest,
   KlingoScheduleBlock,
   KlingoCheckinRequest,
   KlingoExamResult,
+  KlingoExamResultPdf,
   KlingoExternalResponse,
+  KlingoRegisterPatientRequest,
+  KlingoRegisteredPatient,
+  KlingoPatientProfile,
+  KlingoSession,
+  KlingoSyncPatientPlanRequest,
 } from './klingo-external-types.js';
 
 export class KlingoExternalClient {
@@ -38,7 +42,7 @@ export class KlingoExternalClient {
   }
 
   private async request<T>(
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
     extraHeaders?: Record<string, string>,
@@ -77,6 +81,57 @@ export class KlingoExternalClient {
 
     // For non-JSON responses (e.g., PDF), return the response as-is
     return res as unknown as T;
+  }
+
+  private async getPatientBearerToken(patientId: number): Promise<string> {
+    const session = await this.loginPatientSession(patientId) as any;
+    const bearerToken = session?.data?.access_token || session?.access_token;
+    if (!bearerToken) {
+      throw new KlingoExternalError('Klingo não retornou bearer token para a sessão do paciente', 502, '');
+    }
+    return bearerToken;
+  }
+
+  private async requestAsPatient<T>(
+    patientId: number,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const bearerToken = await this.getPatientBearerToken(patientId);
+    return this.request<T>(method, path, body, {
+      Authorization: `Bearer ${bearerToken}`,
+    });
+  }
+
+  extractPatientRecord(payload: unknown): Record<string, any> | null {
+    const candidate = payload as any;
+    if (!candidate) return null;
+
+    if (Array.isArray(candidate?.data) && candidate.data.length > 0) {
+      return candidate.data[0];
+    }
+
+    if (Array.isArray(candidate?.lista) && candidate.lista.length > 0) {
+      return candidate.lista[0];
+    }
+
+    if (candidate?.data && typeof candidate.data === 'object' && !Array.isArray(candidate.data)) {
+      return candidate.data;
+    }
+
+    if (typeof candidate === 'object') {
+      return candidate;
+    }
+
+    return null;
+  }
+
+  extractPatientId(payload: unknown): number | null {
+    const patient = this.extractPatientRecord(payload);
+    const rawId = patient?.id_pessoa ?? patient?.id_paciente ?? patient?.chave ?? patient?.id;
+    const patientId = Number(rawId);
+    return Number.isFinite(patientId) && patientId > 0 ? patientId : null;
   }
 
   // === Health ===
@@ -138,8 +193,8 @@ export class KlingoExternalClient {
     planoId?: number,
   ): Promise<KlingoExternalResponse<KlingoProfessional[]>> {
     const qs = new URLSearchParams();
-    if (procedureId) qs.set('procedimento', String(procedureId));
-    if (planoId) qs.set('plano', String(planoId));
+    if (procedureId) qs.set('id_procedimento', String(procedureId));
+    if (planoId) qs.set('id_plano', String(planoId));
     const query = qs.toString();
     return this.request('GET', `/api/agenda/profissionais${query ? '?' + query : ''}`);
   }
@@ -154,33 +209,100 @@ export class KlingoExternalClient {
     procedimentoId: number,
     planoId: number,
   ): Promise<KlingoExternalResponse<KlingoPrice>> {
-    return this.request('GET', `/api/preco?procedimento=${procedimentoId}&plano=${planoId}`);
+    return this.request('GET', `/api/preco?id_procedimento=${procedimentoId}&id_plano=${planoId}`);
+  }
+
+  // === Patient Registration ===
+
+  async registerPatient(
+    data: KlingoRegisterPatientRequest,
+  ): Promise<KlingoExternalResponse<KlingoRegisteredPatient>> {
+    return this.request('POST', '/api/externo/register', data);
+  }
+
+  async loginPatientSession(
+    patientId: number,
+  ): Promise<KlingoExternalResponse<KlingoSession>> {
+    return this.request('POST', '/api/externo/login', { id: `P${patientId}` });
+  }
+
+  async getPatientProfile(
+    bearerToken: string,
+  ): Promise<KlingoPatientProfile> {
+    return this.request('GET', '/api/paciente', undefined, {
+      Authorization: `Bearer ${bearerToken}`,
+    });
+  }
+
+  async updatePatientProfile(
+    bearerToken: string,
+    data: KlingoPatientProfile,
+  ): Promise<KlingoPatientProfile> {
+    return this.request('PUT', '/api/paciente', data, {
+      Authorization: `Bearer ${bearerToken}`,
+    });
+  }
+
+  async syncPatientPlan(
+    data: KlingoSyncPatientPlanRequest,
+  ): Promise<KlingoExternalResponse> {
+    const conveniosResult = await this.getConvenios() as any;
+    const convenios = (conveniosResult?.data || conveniosResult || []) as KlingoConvenio[];
+    const matchedConvenio = convenios.find((convenio: KlingoConvenio) =>
+      convenio.planos?.some((plano: NonNullable<KlingoConvenio['planos']>[number]) => String(plano.id) === String(data.id_plano)),
+    );
+
+    if (!matchedConvenio) {
+      throw new KlingoExternalError(
+        `Plano ${data.id_plano} não encontrado na lista de convênios da Klingo`,
+        404,
+        '',
+      );
+    }
+
+    const bearerToken = await this.getPatientBearerToken(data.id_paciente);
+    const currentPatient = await this.getPatientProfile(bearerToken);
+    const payload: KlingoPatientProfile = {
+      ...currentPatient,
+      convenio: {
+        ...currentPatient?.convenio,
+        id: String(matchedConvenio.id),
+        reg_ans: matchedConvenio.reg_ans,
+        id_plano: String(data.id_plano),
+        matricula: data.st_numero_carteira || currentPatient?.convenio?.matricula,
+        validade: data.dt_validade_carteira || currentPatient?.convenio?.validade,
+      },
+    };
+
+    await this.updatePatientProfile(bearerToken, payload);
+    return { success: true };
   }
 
   // === Reservation & Booking ===
 
   async reserveSlot(
+    patientId: number,
     data: KlingoReserveSlotRequest,
   ): Promise<KlingoExternalResponse<KlingoReservation>> {
-    return this.request('POST', '/api/agenda/reservar', data);
+    return this.requestAsPatient(patientId, 'POST', '/api/agenda/reservar', data);
   }
 
-  async cancelReservation(reservationId: string): Promise<KlingoExternalResponse> {
-    return this.request('DELETE', `/api/agenda/reservar?id=${encodeURIComponent(reservationId)}`);
+  async cancelReservation(
+    patientId: number,
+    reservationId: string,
+  ): Promise<KlingoExternalResponse> {
+    return this.requestAsPatient(patientId, 'DELETE', '/api/agenda/reservar', { id: reservationId });
   }
 
   async confirmBooking(
+    patientId: number,
     data: KlingoConfirmBookingRequest,
   ): Promise<KlingoExternalResponse<KlingoBookingConfirmation>> {
-    return this.request('POST', '/api/agenda/horario', data);
+    return this.requestAsPatient(patientId, 'POST', '/api/agenda/horario', data);
   }
 
-  async cancelBooking(voucherId: number): Promise<KlingoExternalResponse> {
-    return this.request('DELETE', `/api/voucher?id=${voucherId}`);
-  }
-
-  async getVouchers(): Promise<KlingoExternalResponse<KlingoVoucher[]>> {
-    return this.request('GET', '/api/vouchers');
+  async cancelBooking(patientId: number, voucherId: number): Promise<KlingoExternalResponse> {
+    return this.requestAsPatient(patientId, 'DELETE', '/api/voucher', { id: voucherId });
   }
 
   // === Telefonia (Confirmation) ===
@@ -212,18 +334,21 @@ export class KlingoExternalClient {
 
   // === Check-in ===
 
-  async checkin(data: KlingoCheckinRequest): Promise<KlingoExternalResponse> {
-    return this.request('POST', '/api/checkin', data);
+  async checkin(
+    patientId: number,
+    data: KlingoCheckinRequest,
+  ): Promise<KlingoExternalResponse> {
+    return this.requestAsPatient(patientId, 'POST', '/api/checkin', data);
   }
 
   // === Exam Results ===
 
-  async getExamResult(id: number): Promise<KlingoExternalResponse<KlingoExamResult>> {
+  async getExamResult(id: number): Promise<KlingoExamResult[]> {
     return this.request('GET', `/api/resultado/${id}`);
   }
 
-  async getExamResultPdf(id: number): Promise<Response> {
-    return this.request<Response>('GET', `/api/resultado/pdf/${id}`);
+  async getExamResultPdf(id: number): Promise<KlingoExamResultPdf> {
+    return this.request('GET', `/api/resultado/pdf/${id}`);
   }
 }
 

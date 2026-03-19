@@ -14,6 +14,7 @@ import { processAppointmentConfirmation } from './processors/appointment-confirm
 import { processNpsCollection } from './processors/nps-collection.js';
 import { processPaymentNotification } from './processors/payment-notification.js';
 import { processPaymentReminder } from './processors/payment-reminder.js';
+import { processPaymentApprovalNotification } from './processors/payment-approval.js';
 import { processTeleconsultationReminder } from './processors/teleconsultation-reminder.js';
 import { processTeleconsultationCleanup } from './processors/teleconsultation-cleanup.js';
 import { processKlingoAgendaSync } from './processors/klingo-agenda-sync.js';
@@ -78,6 +79,10 @@ async function start() {
       connection: redisConnection,
       concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.PAYMENT_REMINDER],
     }),
+    new Worker(QUEUE_NAMES.PAYMENT_APPROVAL, processPaymentApprovalNotification, {
+      connection: redisConnection,
+      concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.PAYMENT_APPROVAL],
+    }),
     new Worker(QUEUE_NAMES.TELECONSULTATION_REMINDER, processTeleconsultationReminder, {
       connection: redisConnection,
       concurrency: QUEUE_CONCURRENCY[QUEUE_NAMES.TELECONSULTATION_REMINDER],
@@ -128,6 +133,14 @@ async function start() {
   const paymentReminderQueue = new Queue(QUEUE_NAMES.PAYMENT_REMINDER, { connection: redisConnection });
   await paymentReminderQueue.add('daily-payment-reminder', {}, {
     repeat: { pattern: '0 13 * * *' }, // 13:00 UTC = 10:00 BRT
+    removeOnComplete: 10,
+    removeOnFail: 50,
+  });
+
+  // Schedule daily payment approval notification (every day at 08:00 BRT / 11:00 UTC)
+  const paymentApprovalQueue = new Queue(QUEUE_NAMES.PAYMENT_APPROVAL, { connection: redisConnection });
+  await paymentApprovalQueue.add('daily-payment-approval', {}, {
+    repeat: { pattern: '0 11 * * *' }, // 11:00 UTC = 08:00 BRT
     removeOnComplete: 10,
     removeOnFail: 50,
   });

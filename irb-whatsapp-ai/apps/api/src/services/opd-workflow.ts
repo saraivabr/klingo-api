@@ -227,9 +227,8 @@ export async function performCheckin(
           .limit(1);
 
         if (patient?.klingoPatientId) {
-          await klingoClient.checkin({
-            id_marcacao: appointment.klingoVoucherId,
-            id_paciente: patient.klingoPatientId,
+          await klingoClient.checkin(patient.klingoPatientId, {
+            id: appointment.klingoVoucherId,
           });
           klingoCheckinDone = true;
         }

@@ -112,5 +112,7 @@ const conversationSchema = new Schema<IConversation>({
 
 conversationSchema.index({ patientPhone: 1, status: 1 });
 conversationSchema.index({ status: 1, lastMessageAt: -1 });
+conversationSchema.index({ instanceName: 1, status: 1 });
+conversationSchema.index({ lastMessageAt: -1 });
 
 export const ConversationModel = model<IConversation>('Conversation', conversationSchema);

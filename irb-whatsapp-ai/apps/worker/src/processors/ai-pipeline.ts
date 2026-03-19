@@ -4,6 +4,7 @@ import { QUEUE_NAMES } from '@irb/shared/constants';
 import { callClaude, aiTools, loadKnowledgeBase, buildContext, classifyIntent, checkEscalation, detectEscapePhrase, transitionState, searchKnowledge, formatChunksForPrompt } from '@irb/ai';
 import { eq, ilike, and, gte, lt, ne } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import { KlingoExternalWorkerClient, getKlingoWorkerSyncClient } from './klingo-sync.js';
 
 const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -26,8 +27,51 @@ interface AiPipelineJobData {
   messageId?: string;
 }
 
-const UAZAPI_URL = process.env.UAZAPI_URL || 'https://saraiva.uazapi.com';
-const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || '';
+const UAZAPI_URL = process.env.UAZAPI_URL || process.env.EVOLUTION_API_URL || 'https://saraiva.uazapi.com';
+const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || process.env.EVOLUTION_API_KEY || '';
+
+function getKlingoBookingClient(): KlingoExternalWorkerClient {
+  return getKlingoWorkerSyncClient();
+}
+
+function extractKlingoPatientId(payload: unknown): number | null {
+  const candidate = payload as any;
+  const patient = Array.isArray(candidate?.data) ? candidate.data[0]
+    : candidate?.data && typeof candidate.data === 'object' ? candidate.data
+    : candidate;
+  const rawId = patient?.id_pessoa ?? patient?.id_paciente ?? patient?.chave ?? patient?.id;
+  const patientId = Number(rawId);
+  return Number.isFinite(patientId) && patientId > 0 ? patientId : null;
+}
+
+async function getKlingoPatientBearerToken(
+  baseUrl: string,
+  appToken: string,
+  patientId: number,
+): Promise<string> {
+  const sessionRes = await fetch(`${baseUrl}/api/externo/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-APP-TOKEN': appToken,
+    },
+    body: JSON.stringify({ id: `P${patientId}` }),
+  });
+
+  if (!sessionRes.ok) {
+    const errText = await sessionRes.text().catch(() => '');
+    throw new Error(`Klingo login failed: ${sessionRes.status} ${errText}`);
+  }
+
+  const sessionData = await sessionRes.json() as { data?: { access_token?: string }; access_token?: string };
+  const bearerToken = sessionData?.data?.access_token ?? sessionData?.access_token;
+  if (!bearerToken) {
+    throw new Error('Klingo did not return a bearer token for patient session');
+  }
+
+  return bearerToken;
+}
 
 function pickReactionEmoji(text: string): string | null {
   const lower = text.toLowerCase().trim();
@@ -101,6 +145,276 @@ interface InteractiveHolder {
   message: PendingInteractiveMessage | null;
 }
 
+const JOURNEY_WELCOME = {
+  text: 'Oii! Sou a Julia da IRB Prime Care 😊 O que te trouxe ate a gente?',
+  buttons: [
+    { id: 'agendar', text: 'Quero agendar' },
+    { id: 'conhecer', text: 'Quero conhecer' },
+    { id: 'atendente', text: 'Falar com alguem' },
+  ],
+};
+
+const JOURNEY_TRIAGE = {
+  text: 'Que bom que voce quer cuidar da saude! 😊 Me conta, o que ta te trazendo aqui hoje?',
+  buttons: [
+    { id: 'sintoma', text: 'Tenho um sintoma' },
+    { id: 'checkup', text: 'Quero check-up' },
+    { id: 'exame', text: 'Tenho pedido de exame' },
+  ],
+};
+
+const JOURNEY_EXAM_TYPE = {
+  text: 'Qual tipo de exame voce precisa fazer?',
+  buttons: [
+    { id: 'imagem', text: 'Exame de imagem' },
+    { id: 'sangue', text: 'Exame de sangue' },
+    { id: 'outro', text: 'Outro exame' },
+  ],
+};
+
+interface JourneyGuardResult {
+  text: string;
+  interactive?: PendingInteractiveMessage;
+  model: string;
+}
+
+function buildJourneyGuardResponse(intent: string, text: string): JourneyGuardResult | null {
+  if (intent === 'technical_support' || intent === 'out_of_scope') {
+    return {
+      model: 'journey-guard',
+      text:
+        'Entendi. Isso parece um assunto mais tecnico/operacional do que atendimento clinico da IRB. ' +
+        'Se voce quiser, eu te direciono para recepcao. Se a sua necessidade for consulta, exame ou check-up, eu sigo com voce por aqui.',
+      interactive: {
+        type: 'buttons',
+        text: 'Como voce quer seguir?',
+        buttons: [
+          { id: 'falar_recepcao', text: 'Falar com recepção' },
+          { id: 'agendar_consulta', text: 'Quero agendar' },
+          { id: 'checkup', text: 'Quero check-up' },
+        ],
+        footerText: 'IRB Prime Care',
+      },
+    };
+  }
+
+  const normalized = text.toLowerCase();
+  const mentionsSpecialty = /\b(cardiolog|dermatolog|ginecolog|neurolog|ortoped|pediatr|psiquiatr|urolog|oftalmolog|endocrinolog|gastro|reumatolog|pneumolog|geriatr|odonto)/i.test(normalized);
+  const operationalGreeting =
+    intent === 'greeting' &&
+    !mentionsSpecialty &&
+    /(financeiro|recepcao|recepção|suporte|dr\.?|dra\.?|clinica|cl[ií]nica|sistema|agenda)/i.test(normalized);
+
+  if (operationalGreeting) {
+    return {
+      model: 'journey-guard',
+      text:
+        'Posso ajudar com atendimento da IRB, agendamento e orientacoes ao paciente. ' +
+        'Se isso for uma demanda interna ou operacional, o ideal é seguir com a equipe da recepcao.',
+      interactive: {
+        type: 'buttons',
+        text: 'Qual é o seu objetivo agora?',
+        buttons: [
+          { id: 'agendar_consulta', text: 'Agendar consulta' },
+          { id: 'informacoes_clinica', text: 'Info da clínica' },
+          { id: 'falar_recepcao', text: 'Falar com recepção' },
+        ],
+        footerText: 'IRB Prime Care',
+      },
+    };
+  }
+
+  return null;
+}
+
+function applyJourneyExperienceRules(
+  intent: string,
+  patientText: string,
+  aiText: string,
+  toolsUsed: string[],
+  interactiveHolder: InteractiveHolder,
+  conversation: any,
+): string {
+  const normalized = patientText.trim().toLowerCase();
+  const shortMessage = normalized.length <= 20;
+  const patientMessageCount = conversation.messages.filter((message: any) => message.sender === 'patient').length;
+  const recentAiMessages = [...conversation.messages]
+    .reverse()
+    .filter((message: any) => message.sender === 'ai')
+    .slice(0, 2);
+  const recentlyUsedInteractive = recentAiMessages.some(
+    (message: any) => (message.aiMetadata?.interactiveMessagesCount || 0) > 0,
+  );
+
+  if (intent === 'greeting' && shortMessage && patientMessageCount <= 1 && !recentlyUsedInteractive) {
+    interactiveHolder.message = {
+      type: 'buttons',
+      text: JOURNEY_WELCOME.text,
+      buttons: JOURNEY_WELCOME.buttons,
+      footerText: 'IRB Prime Care',
+    };
+    return 'Oii! Sou a Julia, da IRB Prime Care 😊 Como posso te ajudar hoje?';
+  }
+
+  // Only show triage buttons if patient hasn't specified a specialty yet
+  // and AI hasn't already used booking tools
+  const specialtyMentioned = /\b(cardiolog|dermatolog|ginecolog|neurolog|ortoped|pediatr|psiquiatr|urolog|oftalmolog|endocrinolog|gastro|reumatolog|pneumolog|geriatr|odonto)/i.test(normalized);
+  if (intent === 'appointment_booking'
+    && !toolsUsed.includes('send_interactive_message')
+    && !toolsUsed.includes('generate_booking_link')
+    && !toolsUsed.includes('check_availability')
+    && !toolsUsed.includes('book_appointment')
+    && !specialtyMentioned
+  ) {
+    interactiveHolder.message = {
+      type: 'buttons',
+      text: JOURNEY_TRIAGE.text,
+      buttons: JOURNEY_TRIAGE.buttons,
+      footerText: 'IRB Prime Care',
+    };
+    return 'Perfeito. Antes de te mostrar horarios, quero te direcionar certinho 😊';
+  }
+
+  if (/\b(pedido de exame|exame|resultado)\b/i.test(normalized) && !interactiveHolder.message && !recentlyUsedInteractive) {
+    interactiveHolder.message = {
+      type: 'buttons',
+      text: JOURNEY_EXAM_TYPE.text,
+      buttons: JOURNEY_EXAM_TYPE.buttons,
+      footerText: 'IRB Prime Care',
+    };
+    return aiText || 'Certo. Me diz qual tipo de exame voce precisa para eu te orientar melhor.';
+  }
+
+  if (intent === 'gratitude') {
+    interactiveHolder.message = null;
+    return 'Eu que agradeco 😊 Se precisar de algo, é so me chamar por aqui.';
+  }
+
+  if (intent === 'unknown' && !interactiveHolder.message) {
+    return shortMessage
+      ? 'Entendi 😊 Me conta com um pouquinho mais de detalhe o que voce precisa, que eu te direciono melhor.'
+      : aiText;
+  }
+
+  return aiText;
+}
+
+function shouldKeepInteractiveMessage(
+  intent: string,
+  patientText: string,
+  aiText: string,
+  toolsUsed: string[],
+  interactiveMessage: PendingInteractiveMessage | null,
+  conversation: any,
+): boolean {
+  if (!interactiveMessage) return false;
+
+  if (toolsUsed.includes('generate_booking_link')) return true;
+  if (toolsUsed.includes('book_appointment')) return true;
+  if (toolsUsed.includes('check_availability')) return true;
+  if (intent === 'appointment_booking') return true;
+  if (intent === 'human_request') return true;
+  if (intent === 'technical_support' || intent === 'out_of_scope') return true;
+
+  const normalized = patientText.trim().toLowerCase();
+  const isGreeting = /^(oi|ol[áa]|bom dia|boa tarde|boa noite|hey|hello)\b/.test(normalized);
+  const patientMessageCount = conversation.messages.filter((message: any) => message.sender === 'patient').length;
+  if (isGreeting && patientMessageCount <= 1) return true;
+
+  const recentAiMessages = [...conversation.messages]
+    .reverse()
+    .filter((message: any) => message.sender === 'ai')
+    .slice(0, 2);
+  const recentlyUsedInteractive = recentAiMessages.some(
+    (message: any) => (message.aiMetadata?.interactiveMessagesCount || 0) > 0,
+  );
+  if (recentlyUsedInteractive) return false;
+
+  if (/\b(pedido de exame|exame|resultado)\b/i.test(normalized)) return true;
+  if (toolsUsed.includes('get_service_price') || toolsUsed.includes('get_patient_appointments')) return true;
+
+  return false;
+}
+
+function updateResponseMetrics(conversation: any, responseTimestamp: Date): void {
+  const lastPatientMessage = [...conversation.messages].reverse().find((m: any) => m.sender === 'patient' && m.timestamp);
+  if (!lastPatientMessage?.timestamp) return;
+
+  const responseTimeMs = Math.max(0, responseTimestamp.getTime() - new Date(lastPatientMessage.timestamp).getTime());
+  if (!responseTimeMs) return;
+
+  if (!conversation.metrics.firstResponseTimeMs) {
+    conversation.metrics.firstResponseTimeMs = responseTimeMs;
+  }
+
+  const previousCount = conversation.metrics.aiMessages || 0;
+  const previousAvg = conversation.metrics.avgResponseTimeMs || 0;
+  conversation.metrics.avgResponseTimeMs =
+    Math.round(((previousAvg * previousCount) + responseTimeMs) / (previousCount + 1));
+}
+
+function applyOperationalFallbacks(
+  intent: string,
+  aiText: string,
+  toolsUsed: string[],
+  interactiveHolder: InteractiveHolder,
+): string {
+  const lower = aiText.toLowerCase();
+
+  const priceUnavailable =
+    (intent === 'price_inquiry' || toolsUsed.includes('get_service_price')) &&
+    /(nao consegui|não consegui|nao encontrei|não encontrei).*(pre[cç]o|valor|custo)/i.test(lower);
+
+  if (priceUnavailable) {
+    const fallbackText =
+      'Para te passar o valor exato sem risco de erro, vou te conectar com a recepção agora. ' +
+      'Se preferir, também posso já adiantar seu agendamento.';
+
+    if (!interactiveHolder.message) {
+      interactiveHolder.message = {
+        type: 'buttons',
+        text: fallbackText,
+        buttons: [
+          { id: 'falar_recepcao', text: 'Falar com recepção' },
+          { id: 'agendar_consulta', text: 'Quero agendar' },
+          { id: 'depois', text: 'Depois eu volto' },
+        ],
+        footerText: 'IRB Prime Care',
+      };
+    }
+
+    console.warn('[AI-PIPELINE] Applied operational fallback: price_unavailable');
+    return fallbackText;
+  }
+
+  const appointmentsUnavailable =
+    toolsUsed.includes('get_patient_appointments') &&
+    /(nao encontrei|não encontrei|nenhum agendamento)/i.test(lower);
+
+  if (appointmentsUnavailable) {
+    const fallbackText =
+      'Não achei um agendamento ativo neste momento. Se você quiser, eu já te envio um novo link para remarcar agora.';
+
+    if (!interactiveHolder.message) {
+      interactiveHolder.message = {
+        type: 'buttons',
+        text: fallbackText,
+        buttons: [
+          { id: 'remarcar_agora', text: 'Remarcar agora' },
+          { id: 'falar_recepcao', text: 'Falar com recepção' },
+          { id: 'depois', text: 'Depois eu volto' },
+        ],
+        footerText: 'IRB Prime Care',
+      };
+    }
+
+    console.warn('[AI-PIPELINE] Applied operational fallback: appointments_unavailable');
+    return fallbackText;
+  }
+
+  return aiText;
+}
+
 const BOOKING_BASE_URL = process.env.BOOKING_BASE_URL || 'https://irb.saraiva.ai/agendar';
 
 // Tool execution handlers
@@ -145,15 +459,35 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
               headers: { 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN },
             });
             if (specRes.ok) {
-              const specData = await specRes.json() as { data?: Array<{ id: number; nome: string }> };
-              const specs = Array.isArray(specData.data) ? specData.data : (Array.isArray(specData) ? specData as any[] : []);
+              const specData = await specRes.json() as any;
+              // API may return array directly or { data: [...] }
+              const specs = Array.isArray(specData) ? specData : (Array.isArray(specData?.data) ? specData.data : []);
               const match = specs.find((s: any) =>
                 s.nome && s.nome.toLowerCase().includes(specialty.toLowerCase())
               );
-              if (match) especialidadeId = match.id;
+              if (match) especialidadeId = match.id || match.codigo;
             }
           } catch (specErr) {
             console.warn('[ai-pipeline] Could not fetch specialties:', specErr);
+          }
+
+          // Resolve specialty to exam ID (Klingo requires 'exame' param for slots)
+          let exameId: number | undefined;
+          try {
+            const examesRes = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/agenda/exames`, {
+              headers: { 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN },
+            });
+            if (examesRes.ok) {
+              const examesData = await examesRes.json() as any;
+              const exames = Array.isArray(examesData) ? examesData : (examesData?.data || examesData?.exames || []);
+              // Find first exam matching the specialty
+              const exameMatch = exames.find((e: any) =>
+                e.especialidade && e.especialidade.toLowerCase().includes(specialty.toLowerCase())
+              );
+              if (exameMatch) exameId = exameMatch.id || exameMatch.codigo;
+            }
+          } catch (exameErr) {
+            console.warn('[ai-pipeline] Could not fetch exams:', exameErr);
           }
 
           const params = new URLSearchParams({
@@ -161,6 +495,8 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
             fim: end.toISOString().split('T')[0],
           });
           if (especialidadeId) params.set('especialidade', String(especialidadeId));
+          if (exameId) params.set('exame', String(exameId));
+          params.set('plano', '1'); // PARTICULAR (default)
 
           const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/agenda/horarios?${params.toString()}`, {
             headers: {
@@ -170,8 +506,11 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
           });
 
           if (res.ok) {
-            const data = await res.json() as { data?: Array<{ id: number; data: string; hora: string; nome_medico: string; especialidade: string }> };
-            const extSlots = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data as any[] : []);
+            const rawData = await res.json() as any;
+            // Klingo API returns { horarios: [...], profissionais: [...] } — NOT { data: [...] }
+            const extSlots = Array.isArray(rawData.horarios) ? rawData.horarios
+              : Array.isArray(rawData.data) ? rawData.data
+              : Array.isArray(rawData) ? rawData : [];
 
             // Additional client-side filter by specialty name if Klingo ID was not resolved
             const filtered = extSlots.filter((s: any) =>
@@ -260,7 +599,7 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         }
       }
 
-      // Find or create patient
+      // Find or create patient locally
       let patientId: string | undefined;
       let patientKlingoId: number | undefined;
       if (context?.patientPhone) {
@@ -283,10 +622,123 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         }
       }
 
-      // Create the appointment locally
+      // ── KLINGO SYNC: Reserve BEFORE creating local appointment ──
       const KLINGO_APP_TOKEN_BOOK = process.env.KLINGO_APP_TOKEN;
-      const KLINGO_BASE_BOOK = process.env.KLINGO_EXTERNAL_BASE_URL || 'https://api-externa.klingo.app';
+      let klingoSynced = false;
+      let klingoSyncStatus: string = KLINGO_APP_TOKEN_BOOK ? 'pending' : 'skipped';
+      let klingoSyncError: string | undefined;
+      let klingoReservationId: string | undefined;
+      let klingoVoucherId: number | null = null;
+      let klingoSlotId: number | undefined;
 
+      if (KLINGO_APP_TOKEN_BOOK) {
+        const klingo = getKlingoBookingClient();
+
+        // Step 1: Identify patient in Klingo
+        if (!patientKlingoId && context?.patientPhone) {
+          try {
+            const cleanPhone = context.patientPhone.replace(/\D/g, '').replace(/^55/, '');
+            const phoneResult = await klingo.identifyPatientByPhone(cleanPhone);
+            const foundId = klingo.extractPatientId(phoneResult);
+            if (foundId) {
+              patientKlingoId = foundId;
+              console.log(`[ai-pipeline] Klingo patient identified by phone: ${foundId}`);
+            }
+          } catch (phoneErr) {
+            console.warn(`[ai-pipeline] Klingo phone lookup failed: ${(phoneErr as Error).message}`);
+          }
+        }
+
+        // Update local patient with Klingo ID
+        if (patientKlingoId && patientId) {
+          await db.update(schema.patients)
+            .set({ klingoPatientId: patientKlingoId, updatedAt: new Date() })
+            .where(eq(schema.patients.id, patientId));
+        }
+
+        // Step 2: Get available slots from Klingo for the target date
+        if (patientKlingoId) {
+          try {
+            const dateStr = scheduledAt.toISOString().split('T')[0];
+            const slotsResult = await klingo.getAvailableSlots({
+              inicio: dateStr,
+              fim: dateStr,
+              plano: 1, // PARTICULAR
+            }) as any;
+
+            // Parse slots — Klingo returns nested { horarios: [...] } or { data: [...] }
+            const rawSlots: Array<{ id: number; data: string; hora: string; id_medico?: number }> = [];
+            const extSlots = Array.isArray(slotsResult?.horarios) ? slotsResult.horarios
+              : Array.isArray(slotsResult?.data) ? slotsResult.data
+              : Array.isArray(slotsResult) ? slotsResult : [];
+
+            for (const s of extSlots) {
+              const slotHorarios = s.horarios;
+              if (slotHorarios && typeof slotHorarios === 'object' && !Array.isArray(slotHorarios)) {
+                for (const [key, hora] of Object.entries(slotHorarios)) {
+                  rawSlots.push({ id: Number(key), data: s.data, hora: hora as string, id_medico: s.id_profissional || s.id_medico });
+                }
+              } else if (s.id && s.hora) {
+                rawSlots.push({ id: s.id, data: s.data, hora: s.hora, id_medico: s.id_medico });
+              }
+            }
+
+            // Deterministic time format: HH:mm (no locale dependency)
+            const targetHour = String(scheduledAt.getHours()).padStart(2, '0');
+            const targetMin = String(scheduledAt.getMinutes()).padStart(2, '0');
+            const targetTime = `${targetHour}:${targetMin}`;
+
+            // Normalize slot time to HH:mm for comparison
+            const normalizeTime = (t: string): string => {
+              const parts = t.split(':');
+              return `${String(parts[0]).padStart(2, '0')}:${String(parts[1] || '00').padStart(2, '0')}`;
+            };
+
+            // Match by time + doctor preference
+            const matchingSlot = rawSlots.find(s =>
+              normalizeTime(s.hora) === targetTime && (!doctorKlingoId || s.id_medico === doctorKlingoId)
+            ) || rawSlots.find(s => normalizeTime(s.hora) === targetTime);
+
+            if (matchingSlot) {
+              klingoSlotId = matchingSlot.id;
+
+              // Step 3: Reserve the slot (10-min hold)
+              try {
+                const reservation = await klingo.reserveSlot(patientKlingoId, {
+                  id_horario: matchingSlot.id,
+                  id_paciente: patientKlingoId,
+                });
+
+                if (reservation.data?.id) {
+                  klingoReservationId = reservation.data.id;
+                  console.log(`[ai-pipeline] Klingo slot reserved: reservation=${klingoReservationId}`);
+                } else {
+                  klingoSyncError = 'reserveSlot returned no reservation ID';
+                  klingoSyncStatus = 'failed';
+                }
+              } catch (resErr) {
+                klingoSyncError = `reserveSlot failed: ${(resErr as Error).message}`;
+                klingoSyncStatus = 'failed';
+                console.error(`[ai-pipeline] Klingo reserveSlot failed: ${(resErr as Error).message}`);
+              }
+            } else {
+              klingoSyncError = `No matching slot at ${targetTime} in Klingo (${rawSlots.length} slots available)`;
+              klingoSyncStatus = 'failed';
+              console.warn(`[ai-pipeline] ${klingoSyncError}`);
+            }
+          } catch (slotsErr) {
+            klingoSyncError = `getAvailableSlots failed: ${(slotsErr as Error).message}`;
+            klingoSyncStatus = 'failed';
+            console.error(`[ai-pipeline] Klingo slots fetch error: ${(slotsErr as Error).message}`);
+          }
+        } else {
+          klingoSyncError = 'Paciente nao identificado no Klingo (sem klingoPatientId)';
+          klingoSyncStatus = 'failed';
+          console.warn(`[ai-pipeline] ${klingoSyncError}`);
+        }
+      }
+
+      // ── Create appointment locally (with Klingo reservation data if available) ──
       const [appointment] = await db.insert(schema.appointments).values({
         patientId,
         doctorId,
@@ -295,82 +747,73 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
         status: 'scheduled',
         createdBy: 'ai',
         conversationMongoId: context?.conversationId,
-        klingoSyncStatus: KLINGO_APP_TOKEN_BOOK ? 'pending' : 'skipped',
+        klingoSyncStatus,
+        klingoReservationId: klingoReservationId || undefined,
+        klingoSyncError: klingoSyncError || undefined,
       }).returning({ id: schema.appointments.id });
 
-      // Sync with Klingo: reserve slot + confirm booking
-      let klingoSynced = false;
-      if (KLINGO_APP_TOKEN_BOOK && patientKlingoId) {
+      // ── Confirm booking in Klingo (convert reservation → voucher) ──
+      if (klingoReservationId && patientKlingoId) {
+        const klingo = getKlingoBookingClient();
         try {
-          // First, find matching slot in Klingo
-          const dateStr = scheduledAt.toISOString().split('T')[0];
-          const slotsRes = await fetch(`${KLINGO_BASE_BOOK}/api/agenda/horarios?inicio=${dateStr}&fim=${dateStr}`, {
-            headers: { 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN_BOOK },
+          const confirmation = await klingo.confirmBooking(patientKlingoId, {
+            id_reserva: klingoReservationId,
+            id_paciente: patientKlingoId,
           });
 
-          if (slotsRes.ok) {
-            const slotsData = await slotsRes.json() as { data?: Array<{ id: number; data: string; hora: string; id_medico: number }> };
-            const slots = Array.isArray(slotsData.data) ? slotsData.data : [];
-            const timeStr = scheduledAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-            // Match by time (and doctor if available)
-            const matchingSlot = slots.find(s =>
-              s.hora === timeStr && (!doctorKlingoId || s.id_medico === doctorKlingoId)
-            ) || slots.find(s => s.hora === timeStr);
-
-            if (matchingSlot) {
-              // Reserve the slot (10 min hold)
-              const reserveRes = await fetch(`${KLINGO_BASE_BOOK}/api/agenda/reservar`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN_BOOK },
-                body: JSON.stringify({ id_horario: matchingSlot.id, id_paciente: patientKlingoId }),
-              });
-
-              if (reserveRes.ok) {
-                const reserveData = await reserveRes.json() as { data?: { id: string } };
-                const reservationId = reserveData.data?.id;
-
-                if (reservationId) {
-                  // Confirm the booking
-                  const confirmRes = await fetch(`${KLINGO_BASE_BOOK}/api/agenda/horario`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-APP-TOKEN': KLINGO_APP_TOKEN_BOOK },
-                    body: JSON.stringify({ id_reserva: reservationId, id_paciente: patientKlingoId }),
-                  });
-
-                  if (confirmRes.ok) {
-                    const confirmData = await confirmRes.json() as { data?: { voucher_id: number } };
-                    await db.update(schema.appointments).set({
-                      klingoSyncStatus: 'synced',
-                      klingoVoucherId: confirmData.data?.voucher_id ?? null,
-                      klingoReservationId: reservationId,
-                    }).where(eq(schema.appointments.id, appointment.id));
-                    klingoSynced = true;
-                    console.log(`[ai-pipeline] Klingo booking synced: voucher=${confirmData.data?.voucher_id}`);
-                  }
-                }
-              }
-            }
-          }
-
-          if (!klingoSynced) {
-            await db.update(schema.appointments).set({
-              klingoSyncStatus: 'failed',
-              klingoSyncError: 'No matching slot found in Klingo or reservation failed',
-            }).where(eq(schema.appointments.id, appointment.id));
-            console.warn('[ai-pipeline] Klingo sync failed: no matching slot or reservation error');
-          }
-        } catch (klingoErr) {
-          console.error('[ai-pipeline] Klingo booking sync error:', klingoErr);
+          klingoVoucherId = confirmation.data?.voucher_id ?? null;
+          await db.update(schema.appointments).set({
+            klingoSyncStatus: 'synced',
+            klingoVoucherId,
+            klingoSyncError: null,
+          }).where(eq(schema.appointments.id, appointment.id));
+          klingoSynced = true;
+          console.log(`[ai-pipeline] Klingo booking confirmed: voucher=${klingoVoucherId}, reservation=${klingoReservationId}`);
+        } catch (confErr) {
+          const errMsg = `confirmBooking failed: ${(confErr as Error).message}`;
           await db.update(schema.appointments).set({
             klingoSyncStatus: 'failed',
-            klingoSyncError: (klingoErr as Error).message,
+            klingoSyncError: errMsg,
           }).where(eq(schema.appointments.id, appointment.id));
+          klingoSyncError = errMsg;
+          console.error(`[ai-pipeline] Klingo confirmBooking failed: ${(confErr as Error).message}`);
         }
       }
 
+      // ── Notify team when sync fails (BUG 5 fix) ──
+      if (KLINGO_APP_TOKEN_BOOK && !klingoSynced) {
+        const notifyPhone = process.env.TEAM_NOTIFY_PHONE;
+        if (notifyPhone) {
+          const dateFormatted = scheduledAt.toLocaleDateString('pt-BR');
+          const timeFormatted = `${String(scheduledAt.getHours()).padStart(2, '0')}:${String(scheduledAt.getMinutes()).padStart(2, '0')}`;
+          await messageSendQueue.add('send', {
+            conversationId: `team-notify-${appointment.id}`,
+            patientPhone: notifyPhone,
+            text: `⚠️ AGENDAMENTO VIA IA precisa de acao manual:\n\n📋 ${klingoSyncError || 'Klingo sync falhou'}\n👤 Paciente: ${patientNameInput}\n📱 Tel: ${context?.patientPhone || 'N/A'}\n🏥 ${service?.name || serviceName}\n📅 ${dateFormatted} as ${timeFormatted}\n\nPor favor, verifique no Klingo e confirme o agendamento.`,
+            instanceName: 'uazapi',
+          }, { removeOnComplete: 100, removeOnFail: 500 });
+        }
+
+        // ── Enqueue retry via klingo-sync queue (BUG 5 fix) ──
+        const klingoSyncQueue = new Queue(QUEUE_NAMES.KLINGO_SYNC, { connection: redisConnection });
+        await klingoSyncQueue.add('sync', {
+          appointmentId: appointment.id,
+          patientName: patientNameInput,
+          patientPhone: context?.patientPhone,
+          doctorId,
+          slotDate: scheduledAt.toISOString().split('T')[0],
+          klingoSlotId: klingoSlotId,
+        }, {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 60_000 },
+          removeOnComplete: 100,
+          removeOnFail: 500,
+        });
+        console.log(`[ai-pipeline] Enqueued klingo-sync retry for appointment ${appointment.id}`);
+      }
+
       const dateFormatted = scheduledAt.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
-      const timeFormatted = scheduledAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const timeFormatted = `${String(scheduledAt.getHours()).padStart(2, '0')}:${String(scheduledAt.getMinutes()).padStart(2, '0')}`;
 
       return JSON.stringify({
         success: true,
@@ -443,18 +886,44 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
           }
         }
       } else if (messageType === 'list') {
-        if (!listSections || listSections.length === 0) {
+        // Lists don't work well on WhatsApp — auto-convert to buttons using first 3 items
+        console.warn('[TOOL] send_interactive_message: auto-converting list to buttons (lists not supported)');
+        const allItems = (listSections || []).flatMap(s => s.items);
+        const truncatedItems = allItems.slice(0, 3);
+        if (truncatedItems.length === 0) {
           return JSON.stringify({
             success: false,
             error: 'Lista precisa de pelo menos uma seção com itens',
           });
         }
-        if (!listButtonText) {
-          return JSON.stringify({
-            success: false,
-            error: 'Lista precisa de um texto para o botão (list_button_text)',
-          });
+        if (allItems.length > 3) {
+          console.warn(`[TOOL] send_interactive_message: truncated list from ${allItems.length} to 3 items`);
         }
+
+        // Store as buttons instead of list
+        const interactiveMsg: PendingInteractiveMessage = {
+          type: 'buttons',
+          text,
+          buttons: truncatedItems.map(item => ({
+            id: item.id.substring(0, 20),
+            text: (item.title || '').length > 20 ? item.title.substring(0, 19) + '…' : item.title,
+          })),
+          footerText,
+        };
+
+        if (interactiveHolder) {
+          interactiveHolder.message = interactiveMsg;
+        }
+
+        console.log('[TOOL] Interactive message stored (list→buttons):', interactiveMsg);
+
+        return JSON.stringify({
+          success: true,
+          message: 'Mensagem interativa configurada! Os botões serão enviados automaticamente após sua resposta de texto.',
+          type: 'buttons',
+          interactiveText: text,
+          optionsCount: truncatedItems.length,
+        });
       }
 
       // Store the interactive message to be sent (via holder to avoid race conditions)
@@ -573,9 +1042,32 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
       let klingoCancelled = false;
       if (KLINGO_APP_TOKEN && nextAppt.klingoVoucherId) {
         try {
-          const cancelRes = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/voucher?id=${nextAppt.klingoVoucherId}`, {
+          const [patientRecord] = nextAppt.patientId
+            ? await db.select({ klingoPatientId: schema.patients.klingoPatientId })
+              .from(schema.patients)
+              .where(eq(schema.patients.id, nextAppt.patientId))
+              .limit(1)
+            : [];
+
+          if (!patientRecord?.klingoPatientId) {
+            throw new Error('Paciente sem klingoPatientId para cancelamento na Klingo');
+          }
+
+          const bearerToken = await getKlingoPatientBearerToken(
+            KLINGO_EXTERNAL_BASE_URL,
+            KLINGO_APP_TOKEN,
+            patientRecord.klingoPatientId,
+          );
+
+          const cancelRes = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/voucher`, {
             method: 'DELETE',
-            headers: { 'X-APP-TOKEN': KLINGO_APP_TOKEN, 'Accept': 'application/json' },
+            headers: {
+              'X-APP-TOKEN': KLINGO_APP_TOKEN,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${bearerToken}`,
+            },
+            body: JSON.stringify({ id: nextAppt.klingoVoucherId }),
           });
           if (cancelRes.ok) {
             klingoCancelled = true;
@@ -782,6 +1274,33 @@ async function executeTool(toolName: string, toolInput: Record<string, unknown>,
   }
 }
 
+async function saveConversationWithRetry(conversation: any, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await conversation.save();
+      return;
+    } catch (err: any) {
+      if (err.name === 'VersionError' && attempt < maxRetries - 1) {
+        console.warn(`[ai-pipeline] VersionError on conversation.save() attempt ${attempt + 1}/${maxRetries}, retrying...`);
+        const fresh = await ConversationModel.findById(conversation._id);
+        if (!fresh) throw err;
+        // Copy over the fields we changed
+        fresh.messages = conversation.messages;
+        fresh.metrics = conversation.metrics;
+        fresh.state = conversation.state;
+        fresh.lastMessageAt = conversation.lastMessageAt;
+        fresh.detectedIntents = conversation.detectedIntents;
+        fresh.escapePhraseDetected = conversation.escapePhraseDetected;
+        if (conversation.patientName) fresh.patientName = conversation.patientName;
+        if (conversation.previousStates) fresh.previousStates = conversation.previousStates;
+        conversation = fresh;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   const { conversationId, patientPhone, patientId, patientName, instanceName, messageId } = job.data;
   let { text } = job.data;
@@ -830,105 +1349,132 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   // 3. Detect escape phrases
   const escapeResult = detectEscapePhrase(text);
 
-  // 4. RAG: Search relevant knowledge chunks based on patient message
-  let ragContext = '';
-  try {
-    const ragChunks = await searchKnowledge(text, 5);
-    ragContext = formatChunksForPrompt(ragChunks);
-  } catch (err) {
-    console.error('RAG search failed, continuing without:', err);
-  }
+  let toolsUsed: string[] = [];
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  let aiText = '';
+  let responseModel = 'journey-guard';
+  let stopReason: string | null = 'guard';
 
-  // 5. Build context for Claude (with RAG chunks injected + active doctors)
-  const knowledgeBase = await loadKnowledgeBase();
-  const activeDoctors = await db.select({
-    name: schema.doctors.name,
-    specialty: schema.doctors.specialty,
-    crm: schema.doctors.crm,
-  }).from(schema.doctors).where(eq(schema.doctors.isActive, true));
-
-  const context = buildContext({
-    conversation: conversation as any,
-    knowledgeBase,
-    patientInfo: patientName ? { name: patientName } : null,
-    ragContext,
-    doctors: activeDoctors,
-  });
-
-  // 6. Call Claude
-  console.log('[AI-PIPELINE] Calling Claude with', aiTools.length, 'tools available');
-  let response = await callClaude({
-    systemPrompt: context.systemPrompt,
-    messages: context.messages,
-    tools: aiTools,
-  });
-  console.log('[AI-PIPELINE] Claude response:', {
-    text: response.text?.substring(0, 100),
-    toolCallsCount: response.toolCalls.length,
-    toolNames: response.toolCalls.map(tc => tc.name),
-  });
-
-  // 7. Handle tool calls (loop until no more tool calls)
-  const toolsUsed: string[] = [];
-  let totalPromptTokens = response.promptTokens;
-  let totalCompletionTokens = response.completionTokens;
-
-  while (response.toolCalls.length > 0) {
-    // Build assistant message with tool calls for OpenAI format
-    const assistantMsg: any = {
-      role: 'assistant' as const,
-      content: response.text || null,
-      tool_calls: response.toolCalls.map(tc => ({
-        id: tc.id,
-        type: 'function',
-        function: { name: tc.name, arguments: JSON.stringify(tc.input) },
-      })),
-    };
-
-    const toolResultMsgs: any[] = [];
-    for (const toolCall of response.toolCalls) {
-      toolsUsed.push(toolCall.name);
-      const toolContext: ToolContext = { patientPhone, patientName, conversationId };
-      const result = await executeTool(toolCall.name, toolCall.input as Record<string, unknown>, toolContext, interactiveHolder);
-      toolResultMsgs.push({
-        role: 'tool' as const,
-        tool_call_id: toolCall.id,
-        content: result,
-      });
+  const journeyGuard = buildJourneyGuardResponse(intent, text);
+  if (journeyGuard) {
+    aiText = journeyGuard.text;
+    responseModel = journeyGuard.model;
+    interactiveHolder.message = journeyGuard.interactive || null;
+  } else {
+    // 4. RAG: Search relevant knowledge chunks based on patient message
+    let ragContext = '';
+    try {
+      const ragChunks = await searchKnowledge(text, 5);
+      ragContext = formatChunksForPrompt(ragChunks);
+    } catch (err) {
+      console.error('RAG search failed, continuing without:', err);
     }
 
-    // Re-call with tool results
-    const updatedMessages = [
-      ...context.messages,
-      assistantMsg,
-      ...toolResultMsgs,
-    ];
+    // 5. Build context for Claude (with RAG chunks injected + active doctors)
+    const knowledgeBase = await loadKnowledgeBase();
+    const activeDoctors = await db.select({
+      name: schema.doctors.name,
+      specialty: schema.doctors.specialty,
+      crm: schema.doctors.crm,
+    }).from(schema.doctors).where(eq(schema.doctors.isActive, true));
 
-    response = await callClaude({
-      systemPrompt: context.systemPrompt,
-      messages: updatedMessages,
-      tools: aiTools,
+    const context = buildContext({
+      conversation: conversation as any,
+      knowledgeBase,
+      patientInfo: patientName ? { name: patientName } : null,
+      ragContext,
+      doctors: activeDoctors,
     });
 
-    totalPromptTokens += response.promptTokens;
-    totalCompletionTokens += response.completionTokens;
+    // 6. Call Claude
+    console.log('[AI-PIPELINE] Calling Claude with', aiTools.length, 'tools available');
+    let response = await callClaude({
+      systemPrompt: context.systemPrompt,
+      messages: context.messages,
+      tools: aiTools,
+    });
+    console.log('[AI-PIPELINE] Claude response:', {
+      text: response.text?.substring(0, 100),
+      toolCallsCount: response.toolCalls.length,
+      toolNames: response.toolCalls.map(tc => tc.name),
+    });
+
+    totalPromptTokens = response.promptTokens;
+    totalCompletionTokens = response.completionTokens;
+    responseModel = response.model;
+    stopReason = response.stopReason;
+
+    // 7. Handle tool calls (loop until no more tool calls)
+    while (response.toolCalls.length > 0) {
+      // Build assistant message with tool calls for OpenAI format
+      const assistantMsg: any = {
+        role: 'assistant' as const,
+        content: response.text || null,
+        tool_calls: response.toolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+        })),
+      };
+
+      const toolResultMsgs: any[] = [];
+      for (const toolCall of response.toolCalls) {
+        toolsUsed.push(toolCall.name);
+        const toolContext: ToolContext = { patientPhone, patientName, conversationId };
+        const result = await executeTool(toolCall.name, toolCall.input as Record<string, unknown>, toolContext, interactiveHolder);
+        toolResultMsgs.push({
+          role: 'tool' as const,
+          tool_call_id: toolCall.id,
+          content: result,
+        });
+      }
+
+      // Re-call with tool results
+      const updatedMessages = [
+        ...context.messages,
+        assistantMsg,
+        ...toolResultMsgs,
+      ];
+
+      response = await callClaude({
+        systemPrompt: context.systemPrompt,
+        messages: updatedMessages,
+        tools: aiTools,
+      });
+
+      totalPromptTokens += response.promptTokens;
+      totalCompletionTokens += response.completionTokens;
+      responseModel = response.model;
+      stopReason = response.stopReason;
+    }
+
+    // Strip tool name leaks from AI text (model sometimes writes tool names as text)
+    const TOOL_NAMES = ['send_interactive_message', 'check_availability', 'get_service_price', 'book_appointment', 'get_knowledge', 'generate_booking_link', 'escalate_to_human', 'cancel_appointment', 'get_patient_appointments', 'check_exam_results', 'send_location', 'generate_teleconsultation_link'];
+    aiText = response.text;
+    for (const toolName of TOOL_NAMES) {
+      aiText = aiText.replace(new RegExp(`\\b${toolName}\\b`, 'gi'), '').trim();
+    }
+    // Remove leftover empty lines
+    aiText = aiText.replace(/\n{3,}/g, '\n\n').trim();
   }
 
   const latencyMs = Date.now() - startTime;
-  // Strip tool name leaks from AI text (model sometimes writes tool names as text)
-  const TOOL_NAMES = ['send_interactive_message', 'check_availability', 'get_service_price', 'book_appointment', 'get_knowledge', 'generate_booking_link', 'escalate_to_human', 'cancel_appointment', 'get_patient_appointments', 'check_exam_results', 'send_location', 'generate_teleconsultation_link'];
-  let aiText = response.text;
-  for (const toolName of TOOL_NAMES) {
-    aiText = aiText.replace(new RegExp(`\\b${toolName}\\b`, 'gi'), '').trim();
-  }
-  // Remove leftover empty lines
-  aiText = aiText.replace(/\n{3,}/g, '\n\n').trim();
+  // Enforce operational-safe fallback for known failure patterns
+  aiText = applyOperationalFallbacks(intent, aiText, toolsUsed, interactiveHolder);
+  aiText = applyJourneyExperienceRules(intent, text, aiText, toolsUsed, interactiveHolder, conversation);
 
   // Auto-detect bullet points / numbered lists and convert to interactive buttons
   // This catches cases where the AI writes options as text instead of calling the tool
   // BUT: Don't do this if send_interactive_message was already called!
   const alreadySentInteractive = toolsUsed.includes('send_interactive_message');
-  if (!interactiveHolder.message && !alreadySentInteractive) {
+  const bulletConversionAllowed =
+    intent === 'appointment_booking' ||
+    toolsUsed.includes('check_availability') ||
+    toolsUsed.includes('book_appointment') ||
+    /(escolha|qual dessas|qual opcao|qual opção|prefere|confirmar|periodo|período)/i.test(aiText);
+
+  if (!interactiveHolder.message && !alreadySentInteractive && bulletConversionAllowed) {
     const bulletRegex = /^[\s]*(?:[•\-\*]|\d+[\.\)])\s*(.+)$/gm;
     const bullets: string[] = [];
     let match;
@@ -957,34 +1503,32 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
       aiText = textBefore;
       console.log('[AI-PIPELINE] Auto-converted bullet points to buttons:', interactiveHolder.message.buttons);
     } else if (bullets.length > 3 && bullets.length <= 10) {
-      // Too many for buttons, use a list
+      // Too many for buttons — truncate to first 3 and use buttons (lists don't work well on WhatsApp)
+      const truncated = bullets.slice(0, 3);
       const firstBulletIndex = aiText.search(/^[\s]*(?:[•\-\*]|\d+[\.\)])\s*/m);
       const textBefore = firstBulletIndex > 0 ? aiText.substring(0, firstBulletIndex).trim() : '';
       const interactiveText = textBefore || 'Escolha uma das opções:';
 
       interactiveHolder.message = {
-        type: 'list',
+        type: 'buttons',
         text: interactiveText,
-        listButtonText: 'Ver opções',
-        listSections: [{
-          title: 'Opções',
-          items: bullets.map((b, i) => ({
-            id: b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').substring(0, 20),
-            title: b.length > 24 ? b.substring(0, 23) + '…' : b,
-          })),
-        }],
+        buttons: truncated.map((b, i) => ({
+          id: b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').substring(0, 20),
+          text: b.length > 20 ? b.substring(0, 19) + '…' : b,
+        })),
         footerText: 'IRB Prime Care',
       };
 
       aiText = textBefore;
-      console.log('[AI-PIPELINE] Auto-converted bullet points to list:', bullets.length, 'items');
+      console.warn(`[AI-PIPELINE] Auto-converted ${bullets.length} bullet points to buttons (truncated to first 3, discarded: ${bullets.slice(3).join(', ')})`);
     }
   }
 
   // 8. Check escalation
   // Derive AI confidence from stop reason and tool usage
-  const aiConfidence = response.stopReason === 'stop' && toolsUsed.length > 0 ? 0.85
-    : response.stopReason === 'stop' ? 0.7
+  const aiConfidence = stopReason === 'guard' ? 0.95
+    : stopReason === 'stop' && toolsUsed.length > 0 ? 0.85
+    : stopReason === 'stop' ? 0.7
     : 0.5;
 
   // Track consecutive unknowns from conversation history
@@ -1051,7 +1595,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     aiMetadata: {
       promptTokens: totalPromptTokens,
       completionTokens: totalCompletionTokens,
-      model: response.model,
+      model: responseModel,
       confidenceScore: 0.8,
       intentClassified: intent,
       stateTransition: transition.changed ? { from: conversation.previousStates.at(-1)?.state || '', to: transition.newState } : null,
@@ -1063,6 +1607,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   });
 
   // Update conversation metrics
+  updateResponseMetrics(conversation, new Date());
   conversation.metrics.totalMessages += 1;
   conversation.metrics.aiMessages += 1;
   conversation.detectedIntents = [...new Set([...conversation.detectedIntents, ...allIntents])];
@@ -1073,7 +1618,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     conversation.patientName = patientName;
   }
 
-  await conversation.save();
+  await saveConversationWithRetry(conversation);
 
   // 11. Schedule follow-up if escape phrase detected
   if (escapeResult.detected) {
@@ -1114,8 +1659,13 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
 
   // If an interactive message was configured via tool, include it
   if (interactiveHolder.message) {
-    console.log('[AI-PIPELINE] Adding interactive message to send job:', interactiveHolder.message);
-    sendJobData.interactive = interactiveHolder.message;
+    if (shouldKeepInteractiveMessage(intent, text, aiText, toolsUsed, interactiveHolder.message, conversation)) {
+      console.log('[AI-PIPELINE] Adding interactive message to send job:', interactiveHolder.message);
+      sendJobData.interactive = interactiveHolder.message;
+    } else {
+      console.log('[AI-PIPELINE] Dropping interactive message to reduce UI noise');
+      interactiveHolder.message = null;
+    }
   } else {
     console.log('[AI-PIPELINE] No interactive message pending');
     
@@ -1125,7 +1675,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     // Also detect first contact / greeting scenarios that should always have buttons
     const isFirstContact = conversation.messages.filter(m => m.sender === 'patient').length <= 1;
     const isGreeting = /^(oi|olá|ola|bom dia|boa tarde|boa noite|e ai|eai|hey|hello|hi)\b/i.test(text);
-    const shouldHaveButtons = promisedButtons || (isFirstContact && isGreeting);
+    const shouldHaveButtons = promisedButtons || (isFirstContact && isGreeting && intent === 'greeting');
     
     if (shouldHaveButtons) {
       console.warn('[AI-PIPELINE] ⚠️ AI SHOULD HAVE SENT BUTTONS BUT DIDNT - Adding fallback buttons...');
@@ -1133,7 +1683,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
       
       // Add fallback buttons based on context
       // Since the AI didn't call the tool, we'll add sensible defaults
-      if (isFirstContact || isGreeting) {
+      if (isFirstContact && isGreeting) {
         // First contact: triage buttons
         interactiveHolder.message = {
           type: 'buttons',
@@ -1150,12 +1700,82 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
         aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim();
         sendJobData.text = aiText;
         console.log('[AI-PIPELINE] ✅ Added fallback triage buttons');
-      } else if (promisedButtons) {
-        // Generic case: remove the broken promise from text
-        aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim();
+      } else if (promisedButtons && (intent === 'appointment_booking' || conversation.state === 'scheduling' || conversation.state === 'collecting_info')) {
+        // Generic fallback only for active scheduling contexts
+        const cleanText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*[:.]?$/im, '').trim();
+
+        // Determine context-aware fallback buttons
+        let fallbackButtons: Array<{ id: string; text: string }>;
+        const state = conversation.state;
+
+        if (state === 'scheduling' || state === 'collecting_info' || /agendar|horário|consulta/i.test(aiText)) {
+          fallbackButtons = [
+            { id: 'manha', text: 'Manhã (7h-12h)' },
+            { id: 'tarde', text: 'Tarde (13h-18h)' },
+            { id: 'qualquer', text: 'Qualquer horário' },
+          ];
+        } else if (state === 'price_discussion' || /preço|valor|custo|quanto/i.test(aiText)) {
+          fallbackButtons = [
+            { id: 'agendar', text: 'Quero agendar' },
+            { id: 'outro_servico', text: 'Outro serviço' },
+            { id: 'atendente', text: 'Falar com alguém' },
+          ];
+        } else if (state === 'service_inquiry' || state === 'exploring') {
+          fallbackButtons = [
+            { id: 'agendar', text: 'Quero agendar' },
+            { id: 'preco', text: 'Saber preços' },
+            { id: 'duvida', text: 'Outra dúvida' },
+          ];
+        } else {
+          fallbackButtons = [
+            { id: 'agendar', text: 'Quero agendar' },
+            { id: 'duvida', text: 'Tirar dúvida' },
+            { id: 'atendente', text: 'Falar com alguém' },
+          ];
+        }
+
+        interactiveHolder.message = {
+          type: 'buttons',
+          text: cleanText || aiText,
+          buttons: fallbackButtons,
+          footerText: 'IRB Prime Care',
+        };
+        sendJobData.interactive = interactiveHolder.message;
+        aiText = cleanText || aiText;
         sendJobData.text = aiText;
-        console.log('[AI-PIPELINE] Removed unfulfilled button promise from text');
+        console.log('[AI-PIPELINE] ✅ Added contextual fallback buttons for state:', state);
+      } else if (promisedButtons) {
+        aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*[:.]?$/im, '').trim();
+        sendJobData.text = aiText;
+        console.log('[AI-PIPELINE] Removed broken button promise without sending interactive');
       }
+    }
+  }
+
+  // When generate_booking_link was used, extract URL from AI text and send as CTA button
+  if (toolsUsed.includes('generate_booking_link') && !sendJobData.interactive && !interactiveHolder.message) {
+    const urlMatch = aiText.match(/(https?:\/\/irb\.saraiva\.ai\/agendar\/[a-zA-Z0-9_-]+)/);
+    if (urlMatch) {
+      const bookingUrl = urlMatch[1];
+      // Remove URL from text so it's not duplicated
+      const cleanText = aiText
+        .replace(urlMatch[0], '')
+        .replace(/\n{2,}/g, '\n\n')
+        .replace(/:\s*$/m, '')
+        .trim();
+
+      interactiveHolder.message = {
+        type: 'buttons',
+        text: cleanText || aiText,
+        buttons: [
+          { id: `url:${bookingUrl}`, text: 'Agendar consulta' },
+        ],
+        footerText: 'IRB Prime Care',
+      };
+      sendJobData.interactive = interactiveHolder.message;
+      aiText = cleanText || aiText;
+      sendJobData.text = aiText;
+      console.log(`[AI-PIPELINE] 📅 Booking link converted to CTA button: ${bookingUrl}`);
     }
   }
 
@@ -1171,7 +1791,11 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
 
   // 13. 🔥 RECUPERADOR DE ATENÇÃO — Agenda quando enviamos mensagem interativa
   // Se enviamos botões, esperamos resposta. Se não vier, ativa o recuperador.
-  if (interactiveHolder.message && !escalationCheck.shouldEscalate) {
+  if (
+    interactiveHolder.message &&
+    !escalationCheck.shouldEscalate &&
+    (intent === 'appointment_booking' || toolsUsed.includes('generate_booking_link') || toolsUsed.includes('book_appointment'))
+  ) {
     // Determina contexto para mensagens de recuperação
     const recoveryContext = intent === 'appointment_booking' ? 'agendamento'
       : intent === 'price_inquiry' ? 'precos'

@@ -41,6 +41,15 @@ const messageSendQueue = new Queue(QUEUE_NAMES.MESSAGE_SEND, { connection: redis
 
 const DEBOUNCE_MS = 4000; // 4 seconds debounce window
 
+// Internal staff/doctors numbers — AI should NOT respond to these
+// Loaded from env var STAFF_PHONES (comma-separated) + hardcoded defaults
+const STAFF_PHONES_ENV = process.env.STAFF_PHONES || '';
+const STAFF_PHONES = new Set<string>([
+  '5511910064651',  // Dr. Flavio Barbieri
+  '5511975830146',  // IRB Recepção (self)
+  ...STAFF_PHONES_ENV.split(',').map(p => p.trim()).filter(Boolean),
+]);
+
 interface IntakeJobData {
   phone: string;
   text: string;
@@ -107,6 +116,13 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
     if (!allowed) {
       console.log(`Rate limited: ${normalizedPhone}`);
       return { status: 'rate_limited' };
+    }
+
+    // 2.1. Skip staff/internal numbers — they should not trigger AI
+    const rawPhone = normalizedPhone.replace(/^\+/, '');
+    if (STAFF_PHONES.has(rawPhone)) {
+      console.log(`[message-intake] Skipping staff number: ${rawPhone} (${pushName})`);
+      return { status: 'staff_ignored' };
     }
 
     // 2.5. Handle calendar button clicks directly (skip AI pipeline)
@@ -305,15 +321,31 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
             .limit(1);
 
           if (pat?.klingoPatientId) {
-            const res = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/checkin`, {
+            const loginRes = await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/externo/login`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'X-APP-TOKEN': KLINGO_APP_TOKEN,
               },
-              body: JSON.stringify({ id_marcacao: marcacaoId, id_paciente: pat.klingoPatientId }),
+              body: JSON.stringify({ id: `P${pat.klingoPatientId}` }),
             });
+
+            const loginJson = await loginRes.json().catch(() => null) as any;
+            const bearerToken = loginJson?.data?.access_token || loginJson?.access_token;
+
+            const res = bearerToken
+              ? await fetch(`${KLINGO_EXTERNAL_BASE_URL}/api/checkin`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-APP-TOKEN': KLINGO_APP_TOKEN,
+                    'Authorization': `Bearer ${bearerToken}`,
+                  },
+                  body: JSON.stringify({ id: marcacaoId }),
+                })
+              : { ok: false };
 
             const responseText = res.ok
               ? 'Check-in feito com sucesso! ✅ Agora é só aguardar ser chamado(a). 😊'
@@ -424,6 +456,37 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
     }).sort({ lastMessageAt: -1 });
 
     if (!conversation) {
+      // Check for previous closed conversations to build context summary
+      let previousContextSummary: string | undefined;
+      const lastClosed = await ConversationModel.findOne({
+        patientPhone: normalizedPhone,
+        status: 'closed',
+      }).sort({ closedAt: -1 }).select('summary state detectedIntents messages closedAt').lean();
+
+      if (lastClosed) {
+        const parts: string[] = [];
+        if (lastClosed.summary) {
+          parts.push(`Resumo anterior: ${lastClosed.summary}`);
+        }
+        if (lastClosed.detectedIntents?.length) {
+          parts.push(`Interesses: ${lastClosed.detectedIntents.join(', ')}`);
+        }
+        if (lastClosed.state) {
+          parts.push(`Ultimo estado: ${lastClosed.state}`);
+        }
+        // Get last few patient messages for context
+        const lastMsgs = (lastClosed.messages || [])
+          .filter((m: any) => m.sender === 'patient')
+          .slice(-3)
+          .map((m: any) => m.text);
+        if (lastMsgs.length) {
+          parts.push(`Ultimas msgs: ${lastMsgs.join(' | ')}`);
+        }
+        if (parts.length) {
+          previousContextSummary = `[CONTEXTO ANTERIOR - conversa fechada em ${lastClosed.closedAt ? new Date(lastClosed.closedAt).toLocaleDateString('pt-BR') : '?'}]\n${parts.join('\n')}`;
+        }
+      }
+
       conversation = await ConversationModel.create({
         patientPhone: normalizedPhone,
         patientName: patient.name,
@@ -431,6 +494,7 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
         instanceName,
         state: 'greeting',
         messages: [],
+        ...(previousContextSummary ? { summary: previousContextSummary } : {}),
       });
     }
 

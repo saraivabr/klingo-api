@@ -108,35 +108,75 @@ function mapMessageType(uazapiType: string | undefined): 'text' | 'image' | 'aud
   }
 }
 
+function parseAllowedInstanceNames(): Set<string> {
+  const raw =
+    process.env.UAZAPI_ALLOWED_INSTANCE_NAMES ||
+    process.env.EVOLUTION_INSTANCE_NAME ||
+    'irbPRIME,uazapi';
+  return new Set(
+    raw
+      .split(',')
+      .map(v => v.trim())
+      .filter(Boolean),
+  );
+}
+
 export async function uazapiWebhookRoutes(app: FastifyInstance) {
   app.post('/uazapi', async (request, reply) => {
     const body = request.body as UazapiWebhookBody;
     
     // Webhook authentication - multiple methods supported
-    const WEBHOOK_TOKEN = process.env.UAZAPI_WEBHOOK_TOKEN;
-    const UAZAPI_INSTANCE_TOKEN = process.env.UAZAPI_TOKEN;
-    
+    const WEBHOOK_TOKEN = process.env.UAZAPI_WEBHOOK_TOKEN || process.env.EVOLUTION_WEBHOOK_SECRET;
+    const UAZAPI_INSTANCE_TOKEN = process.env.UAZAPI_TOKEN || process.env.EVOLUTION_API_KEY;
+    // Support comma-separated list of accepted tokens (for multi-instance UAZAPI)
+    const ACCEPTED_TOKENS = process.env.UAZAPI_ACCEPTED_TOKENS;
+    const acceptedTokenSet = new Set<string>();
+    if (UAZAPI_INSTANCE_TOKEN) acceptedTokenSet.add(UAZAPI_INSTANCE_TOKEN);
+    if (WEBHOOK_TOKEN) acceptedTokenSet.add(WEBHOOK_TOKEN);
+    if (ACCEPTED_TOKENS) {
+      ACCEPTED_TOKENS.split(',').map(t => t.trim()).filter(Boolean).forEach(t => acceptedTokenSet.add(t));
+    }
+
     // Method 1: Header x-webhook-token
-    const headerToken = request.headers['x-webhook-token'];
+    const headerToken = request.headers['x-webhook-token'] as string | undefined;
     // Method 2: Query string ?token=xxx
     const queryToken = (request.query as Record<string, string>)?.token;
     // Method 3: Instance token in body (UAZAPI sends this)
     const bodyToken = body.token;
-    
-    const isAuthorized = 
-      (WEBHOOK_TOKEN && (headerToken === WEBHOOK_TOKEN || queryToken === WEBHOOK_TOKEN)) ||
-      (UAZAPI_INSTANCE_TOKEN && bodyToken === UAZAPI_INSTANCE_TOKEN) ||
-      // Fallback: accept if no token is configured (dev mode)
-      (!WEBHOOK_TOKEN && !UAZAPI_INSTANCE_TOKEN);
-    
+
+    const isAuthorized =
+      (headerToken && acceptedTokenSet.has(headerToken)) ||
+      (queryToken && acceptedTokenSet.has(queryToken)) ||
+      (bodyToken && acceptedTokenSet.has(bodyToken)) ||
+      // In production, reject if no tokens configured. In dev, allow.
+      (process.env.NODE_ENV !== 'production' && acceptedTokenSet.size === 0);
+
     if (!isAuthorized) {
       app.log.warn({
         ip: request.ip,
-        hasHeaderToken: !!headerToken,
-        hasQueryToken: !!queryToken,
-        hasBodyToken: !!bodyToken,
+        bodyToken: bodyToken,
+        acceptedCount: acceptedTokenSet.size,
       }, '[uazapi-webhook] Unauthorized webhook request');
       return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
+    const incomingInstanceName = (
+      body.instanceName ||
+      process.env.UAZAPI_INSTANCE_NAME ||
+      process.env.EVOLUTION_INSTANCE_NAME ||
+      'uazapi'
+    ).trim();
+    const allowedInstanceNames = parseAllowedInstanceNames();
+    if (!allowedInstanceNames.has(incomingInstanceName)) {
+      app.log.warn(
+        {
+          ip: request.ip,
+          incomingInstanceName,
+          allowedInstanceNames: [...allowedInstanceNames],
+        },
+        '[uazapi-webhook] Ignored message from non-allowed instance'
+      );
+      return reply.send({ status: 'ignored', reason: 'instance_not_allowed' });
     }
     
     app.log.info({ eventType: body.EventType, chatId: body.message?.chatid || body.chatid }, '[uazapi-webhook] Received');
@@ -218,7 +258,7 @@ export async function uazapiWebhookRoutes(app: FastifyInstance) {
         text: text.trim(),
         pushName: senderName || null,
         messageId,
-        instanceName: body.instanceName || 'uazapi',
+        instanceName: incomingInstanceName,
         timestamp: messageTimestamp 
           ? new Date(messageTimestamp).toISOString()
           : new Date().toISOString(),

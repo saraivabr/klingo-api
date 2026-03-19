@@ -12,6 +12,7 @@ export const QUEUE_NAMES = {
   NPS_COLLECTION: 'nps-collection',
   PAYMENT_NOTIFICATION: 'payment-notification',
   PAYMENT_REMINDER: 'payment-reminder',
+  PAYMENT_APPROVAL: 'payment-approval',
   TELECONSULTATION_REMINDER: 'teleconsultation-reminder',
   TELECONSULTATION_CLEANUP: 'teleconsultation-cleanup',
 } as const;
@@ -32,6 +33,7 @@ export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
   'nps-collection': 2,
   'payment-notification': 3,
   'payment-reminder': 3,
+  'payment-approval': 1,
   'teleconsultation-reminder': 2,
   'teleconsultation-cleanup': 1,
 };

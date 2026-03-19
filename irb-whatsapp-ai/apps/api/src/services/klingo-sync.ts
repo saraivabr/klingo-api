@@ -49,18 +49,55 @@ export async function syncDoctors(): Promise<{
   let failed = 0;
 
   try {
-    // Fetch professionals from Klingo
-    const response = await client.getProfessionals();
+    let professionals: Array<{ id: number; nome: string; especialidade?: string; crm?: string }> = [];
 
-    if (!response.success || !response.data) {
-      throw new Error(
-        response.error || 'Failed to fetch professionals from Klingo'
-      );
+    try {
+      const response = await client.getProfessionals();
+      if (response.success && response.data) {
+        professionals = Array.isArray(response.data)
+          ? response.data
+          : [response.data];
+      }
+    } catch (err) {
+      console.warn('[klingo-sync] getProfessionals fallback engaged:', (err as Error).message);
     }
 
-    const professionals = Array.isArray(response.data)
-      ? response.data
-      : [response.data];
+    if (professionals.length === 0) {
+      const now = new Date();
+      const brtNow = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+      const todayStr = brtNow.toISOString().split('T')[0];
+      const response: any = await client.listForConfirmation(todayStr, { links: false });
+      const appointments = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+          ? response.data
+          : response?.data
+            ? [response.data]
+            : [];
+
+      const byName = new Map<string, { id: number; nome: string; especialidade?: string; crm?: string }>();
+      for (const apt of appointments) {
+        const doctorName = apt.profissional || apt.medico;
+        if (!doctorName) continue;
+        const doctorId = Number(apt.medico_id);
+        if (!Number.isFinite(doctorId) || doctorId <= 0) continue;
+        const key = `${doctorId}:${doctorName}`;
+        if (!byName.has(key)) {
+          byName.set(key, {
+            id: doctorId,
+            nome: doctorName,
+            especialidade: apt.especialidade || 'Geral',
+            crm: apt.crm_medico || apt.crm,
+          });
+        }
+      }
+
+      professionals = [...byName.values()];
+    }
+
+    if (professionals.length === 0) {
+      throw new Error('Failed to fetch professionals from Klingo');
+    }
 
     for (const prof of professionals) {
       try {
@@ -396,43 +433,81 @@ export async function syncVouchers(): Promise<{
   let failed = 0;
 
   try {
-    const response = await client.getVouchers();
+    const now = new Date();
+    const brtNow = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const datesToSync: string[] = [];
 
-    if (!response.success || !response.data) {
-      console.warn('[klingo-sync] No vouchers found or API error');
-      return { synced, failed };
+    for (let offset = -1; offset <= 30; offset++) {
+      const date = new Date(brtNow);
+      date.setDate(date.getDate() + offset);
+      datesToSync.push(date.toISOString().split('T')[0]);
     }
 
-    const vouchers = Array.isArray(response.data)
-      ? response.data
-      : [response.data];
-
-    for (const voucher of vouchers) {
+    for (const dateStr of datesToSync) {
+      let response: any;
       try {
-        // Find appointment by klingoVoucherId
-        const [apt] = await db
-          .select()
-          .from(schema.appointments)
-          .where(eq(schema.appointments.klingoVoucherId, voucher.id))
-          .limit(1);
+        response = await client.listForConfirmation(dateStr, { links: false });
+      } catch (err) {
+        console.error(`[klingo-sync] Failed to fetch telefonia list for ${dateStr}:`, (err as Error).message);
+        failed++;
+        continue;
+      }
 
-        if (apt) {
-          // Update appointment with voucher status
+      const appointments = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.data)
+          ? response.data
+          : response?.data
+            ? [response.data]
+            : [];
+
+      for (const apt of appointments) {
+        try {
+          const voucherId = Number(apt.id_marcacao);
+          if (!Number.isFinite(voucherId) || voucherId <= 0) {
+            continue;
+          }
+
+          const statusMap: Record<string, string> = {
+            P: 'scheduled',
+            C: 'confirmed',
+            N: 'no_show',
+            R: 'cancelled',
+          };
+
+          const nextStatus = statusMap[apt.status_confirmacao] || 'scheduled';
+
+          const [existing] = await db
+            .select({
+              id: schema.appointments.id,
+              status: schema.appointments.status,
+              klingoReservationId: schema.appointments.klingoReservationId,
+            })
+            .from(schema.appointments)
+            .where(eq(schema.appointments.klingoVoucherId, voucherId))
+            .limit(1);
+
+          if (!existing) {
+            continue;
+          }
+
           await db
             .update(schema.appointments)
             .set({
-              status: 'confirmed',
+              status: nextStatus,
+              klingoSyncStatus: 'synced',
+              klingoReservationId: apt.codigo_reserva || existing.klingoReservationId || null,
             })
-            .where(eq(schema.appointments.klingoVoucherId, voucher.id));
+            .where(eq(schema.appointments.id, existing.id));
 
           synced++;
+        } catch (err) {
+          console.error(
+            `[klingo-sync] Failed to sync voucher-like appointment ${apt?.id_marcacao ?? 'unknown'}:`,
+            (err as Error).message
+          );
+          failed++;
         }
-      } catch (err) {
-        console.error(
-          `[klingo-sync] Failed to sync voucher ${voucher.id}:`,
-          (err as Error).message
-        );
-        failed++;
       }
     }
 

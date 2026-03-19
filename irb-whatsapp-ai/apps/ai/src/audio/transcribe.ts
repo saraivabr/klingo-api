@@ -12,8 +12,8 @@ const transcriptionClient = new OpenAI({
 // Groq uses 'whisper-large-v3', OpenAI uses 'whisper-1'
 const WHISPER_MODEL = process.env.GROQ_API_KEY ? 'whisper-large-v3' : 'whisper-1';
 
-const UAZAPI_URL = process.env.UAZAPI_URL || 'https://saraiva.uazapi.com';
-const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || '';
+const UAZAPI_URL = process.env.UAZAPI_URL || process.env.EVOLUTION_API_URL || 'https://saraiva.uazapi.com';
+const UAZAPI_TOKEN = process.env.UAZAPI_TOKEN || process.env.EVOLUTION_API_KEY || '';
 
 interface MessageKey {
   remoteJid: string;

@@ -68,7 +68,10 @@ export class KlingoWorkerClient {
     }
   }
 
-  async getProfessionals(): Promise<
+  async getProfessionals(
+    procedureId?: number,
+    planoId?: number,
+  ): Promise<
     KlingoResponse<Array<{
       id: number;
       nome: string;
@@ -76,7 +79,11 @@ export class KlingoWorkerClient {
       especialidade?: string;
     }>>
   > {
-    return this.request('GET', '/api/agenda/profissionais');
+    const params = new URLSearchParams();
+    if (procedureId) params.set('id_procedimento', String(procedureId));
+    if (planoId) params.set('id_plano', String(planoId));
+    const query = params.toString();
+    return this.request('GET', `/api/agenda/profissionais${query ? `?${query}` : ''}`);
   }
 
   async listForConfirmation(

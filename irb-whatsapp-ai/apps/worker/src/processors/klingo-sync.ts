@@ -17,7 +17,7 @@ interface KlingoSyncJobData {
 }
 
 /** Minimal Klingo External API client for the worker (avoids cross-app imports) */
-class KlingoExternalWorkerClient {
+export class KlingoExternalWorkerClient {
   private baseUrl: string;
   private appToken: string;
 
@@ -26,10 +26,16 @@ class KlingoExternalWorkerClient {
     this.baseUrl = KLINGO_EXTERNAL_BASE_URL.replace(/\/$/, '');
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const headers: Record<string, string> = {
       'X-APP-TOKEN': this.appToken,
       'Accept': 'application/json',
+      ...extraHeaders,
     };
     if (body) headers['Content-Type'] = 'application/json';
 
@@ -47,6 +53,41 @@ class KlingoExternalWorkerClient {
     return await res.json() as T;
   }
 
+  private async getPatientBearerToken(patientId: number): Promise<string> {
+    const session = await this.request<{ data?: { access_token?: string }; access_token?: string }>(
+      'POST',
+      '/api/externo/login',
+      { id: `P${patientId}` },
+    );
+    const bearerToken = session?.data?.access_token ?? session?.access_token;
+    if (!bearerToken) {
+      throw new Error('Klingo did not return a bearer token for patient session');
+    }
+    return bearerToken;
+  }
+
+  private async requestAsPatient<T>(
+    patientId: number,
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const bearerToken = await this.getPatientBearerToken(patientId);
+    return this.request<T>(method, path, body, {
+      Authorization: `Bearer ${bearerToken}`,
+    });
+  }
+
+  extractPatientId(payload: unknown): number | null {
+    const candidate = payload as any;
+    const patient = Array.isArray(candidate?.data) ? candidate.data[0]
+      : candidate?.data && typeof candidate.data === 'object' ? candidate.data
+      : candidate;
+    const rawId = patient?.id_pessoa ?? patient?.id_paciente ?? patient?.chave ?? patient?.id;
+    const patientId = Number(rawId);
+    return Number.isFinite(patientId) && patientId > 0 ? patientId : null;
+  }
+
   async identifyPatientByPhone(phone: string): Promise<{ data?: { id_pessoa: number } }> {
     return this.request('POST', '/api/paciente/identificar', {
       telefone: phone,
@@ -58,17 +99,51 @@ class KlingoExternalWorkerClient {
     return this.request('GET', `/api/paciente/cpf?cpf=${encodeURIComponent(cpf)}`);
   }
 
-  async reserveSlot(data: { id_horario: number; id_paciente: number }): Promise<{ data?: { id: string } }> {
-    return this.request('POST', '/api/agenda/reservar', data);
+  async reserveSlot(patientId: number, data: { id_horario: number; id_paciente: number }): Promise<{ data?: { id: string } }> {
+    return this.requestAsPatient(patientId, 'POST', '/api/agenda/reservar', data);
   }
 
-  async confirmBooking(data: { id_reserva: string; id_paciente: number }): Promise<{ data?: { voucher_id: number } }> {
-    return this.request('POST', '/api/agenda/horario', data);
+  async confirmBooking(patientId: number, data: { id_reserva: string; id_paciente: number }): Promise<{ data?: { voucher_id: number } }> {
+    return this.requestAsPatient(patientId, 'POST', '/api/agenda/horario', data);
+  }
+
+  async cancelReservation(patientId: number, reservationId: string): Promise<unknown> {
+    return this.requestAsPatient(patientId, 'DELETE', '/api/agenda/reservar', { id: reservationId });
+  }
+
+  async registerPatient(data: {
+    paciente: {
+      nome: string;
+      sexo: 'M' | 'F';
+      dt_nasc: string;
+      docs: { cpf: string };
+      contatos: { celular: string; email?: string };
+    };
+  }): Promise<{ data?: { id: number } }> {
+    return this.request('POST', '/api/externo/register', data);
+  }
+
+  async getAvailableSlots(params: {
+    especialidade?: number;
+    exame?: number;
+    profissional?: number;
+    plano?: number;
+    inicio: string;
+    fim: string;
+  }): Promise<unknown> {
+    const qs = new URLSearchParams();
+    if (params.especialidade) qs.set('especialidade', String(params.especialidade));
+    if (params.exame) qs.set('exame', String(params.exame));
+    if (params.profissional) qs.set('profissional', String(params.profissional));
+    if (params.plano) qs.set('plano', String(params.plano));
+    qs.set('inicio', params.inicio);
+    qs.set('fim', params.fim);
+    return this.request('GET', `/api/agenda/horarios?${qs.toString()}`);
   }
 }
 
 let _client: KlingoExternalWorkerClient | null = null;
-function getClient(): KlingoExternalWorkerClient {
+export function getKlingoWorkerSyncClient(): KlingoExternalWorkerClient {
   if (!_client) _client = new KlingoExternalWorkerClient();
   return _client;
 }
@@ -98,7 +173,7 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
   }
 
   try {
-    const klingo = getClient();
+    const klingo = getKlingoWorkerSyncClient();
 
     // Update sync attempts
     await db.update(schema.appointments)
@@ -110,15 +185,17 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
 
     if (cpf) {
       const result = await klingo.identifyPatientByCpf(cpf);
-      if (result.data?.id_pessoa) {
-        klingoPatientId = result.data.id_pessoa;
+      const identifiedPatientId = klingo.extractPatientId(result);
+      if (identifiedPatientId) {
+        klingoPatientId = identifiedPatientId;
       }
     }
 
     if (!klingoPatientId && patientPhone) {
       const result = await klingo.identifyPatientByPhone(patientPhone);
-      if (result.data?.id_pessoa) {
-        klingoPatientId = result.data.id_pessoa;
+      const identifiedPatientId = klingo.extractPatientId(result);
+      if (identifiedPatientId) {
+        klingoPatientId = identifiedPatientId;
       }
     }
 
@@ -134,7 +211,7 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
     }
 
     // Reserve the slot
-    const reservation = await klingo.reserveSlot({
+    const reservation = await klingo.reserveSlot(klingoPatientId, {
       id_horario: klingoSlotId,
       id_paciente: klingoPatientId,
     });
@@ -144,7 +221,7 @@ export async function processKlingoSync(job: Job<KlingoSyncJobData>): Promise<vo
     }
 
     // Confirm the booking
-    const confirmation = await klingo.confirmBooking({
+    const confirmation = await klingo.confirmBooking(klingoPatientId, {
       id_reserva: reservation.data.id,
       id_paciente: klingoPatientId,
     });
