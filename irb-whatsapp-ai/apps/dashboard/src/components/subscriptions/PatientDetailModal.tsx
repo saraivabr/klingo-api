@@ -23,6 +23,7 @@ interface PatientDetail {
     status: string;
     planName: string;
     planPriceCents: number;
+    billingCycle: string;
     nextDueDate: string | null;
   } | null;
 }
@@ -94,6 +95,18 @@ function getInitials(name: string | null): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   return parts[0][0].toUpperCase();
+}
+
+function billingCycleLabel(cycle: string | null | undefined): string {
+  if (cycle === 'SEMIANNUALLY') return 'Semestral';
+  if (cycle === 'YEARLY') return 'Anual';
+  return 'Mensal';
+}
+
+function billingCycleSuffix(cycle: string | null | undefined): string {
+  if (cycle === 'SEMIANNUALLY') return '/6 meses';
+  if (cycle === 'YEARLY') return '/ano';
+  return '/mês';
 }
 
 /* ── component ─────────────────────────────── */
@@ -326,8 +339,10 @@ export default function PatientDetailModal({ patientId, onClose }: Props) {
                       <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">Vence em {fmtDate(data.subscription.nextDueDate)}</p>
                     </div>
                     <div className="text-right">
-                      <span className="font-bold text-emerald-700 tabular-nums text-lg">{fmt(data.subscription.planPriceCents)}</span>
-                      <span className="text-emerald-500 font-normal text-[11px]">/mês</span>
+                      <span className="font-bold text-emerald-700 tabular-nums text-lg" title={billingCycleLabel(data.subscription.billingCycle)}>
+                        {fmt(data.subscription.planPriceCents)}
+                      </span>
+                      <span className="text-emerald-500 font-normal text-[11px]">{billingCycleSuffix(data.subscription.billingCycle)}</span>
                     </div>
                   </div>
                 </div>

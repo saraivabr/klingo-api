@@ -14,6 +14,8 @@ interface Plan {
   name: string;
   slug: string;
   priceCents: number;
+  priceSemestralCents: number | null;
+  priceAnnualCents: number | null;
   description: string;
   features: string[];
 }
@@ -72,7 +74,34 @@ function maskPhone(v: string): string {
   return `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`;
 }
 
-type WizardStep = 'search' | 'patient' | 'plan' | 'confirm' | 'success';
+type WizardStep = 'search' | 'patient' | 'plan' | 'confirm' | 'pix' | 'success';
+
+type BillingCycle = 'MONTHLY' | 'SEMIANNUALLY' | 'YEARLY';
+
+const BILLING_CYCLE_LABELS: Record<BillingCycle, string> = {
+  MONTHLY: 'Mensal',
+  SEMIANNUALLY: 'Semestral',
+  YEARLY: 'Anual',
+};
+
+const BILLING_CYCLE_SUFFIXES: Record<BillingCycle, string> = {
+  MONTHLY: '/mês',
+  SEMIANNUALLY: '/6 meses',
+  YEARLY: '/ano',
+};
+
+function getPlanPriceForCycle(plan: Plan, billingCycle: BillingCycle): number | null {
+  if (billingCycle === 'SEMIANNUALLY') return plan.priceSemestralCents;
+  if (billingCycle === 'YEARLY') return plan.priceAnnualCents;
+  return plan.priceCents;
+}
+
+function getAvailableBillingCycles(plan: Plan): BillingCycle[] {
+  const cycles: BillingCycle[] = ['MONTHLY'];
+  if (plan.priceSemestralCents !== null && plan.priceSemestralCents !== undefined) cycles.push('SEMIANNUALLY');
+  if (plan.priceAnnualCents !== null && plan.priceAnnualCents !== undefined) cycles.push('YEARLY');
+  return cycles;
+}
 
 /* ── component ─────────────────────────────── */
 
@@ -94,16 +123,33 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
 
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [billingType, setBillingType] = useState<'PIX' | 'BOLETO' | 'CREDIT_CARD'>('PIX');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('MONTHLY');
   const [expandedFeatures, setExpandedFeatures] = useState<string | null>(null);
+  const [igsPlanDefaults, setIgsPlanDefaults] = useState<Record<string, { id: string; name: string }[]>>({});
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [pixInfo, setPixInfo] = useState<{ qrCodeImage: string; qrCodePayload: string; invoiceUrl?: string; paymentId?: string } | null>(null);
+  const [pixCopied, setPixCopied] = useState(false);
 
   useEffect(() => {
     if (plans.length === 0) {
       api.getPlans().then(data => setPlans(data.plans));
     }
+    api.getIGSPlanDefaults().then(defaults => {
+      const map: Record<string, { id: string; name: string }[]> = {};
+      for (const d of defaults) map[d.planSlug] = d.products;
+      setIgsPlanDefaults(map);
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!selectedPlan) return;
+    const availableCycles = getAvailableBillingCycles(selectedPlan);
+    if (!availableCycles.includes(billingCycle)) {
+      setBillingCycle(availableCycles[0] || 'MONTHLY');
+    }
+  }, [selectedPlan, billingCycle]);
 
   const handleKlingoSearch = async () => {
     const cpfClean = cpfSearch.replace(/\D/g, '');
@@ -157,19 +203,36 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
         email: patientForm.email || undefined,
       });
 
-      await api.createSubscription({
+      const result = await api.createSubscription({
         patientId: patient.id,
         planId: selectedPlan.id,
         billingType,
+        billingCycle,
         cpf: patientForm.cpf.replace(/\D/g, ''),
         email: patientForm.email || undefined,
       });
 
-      setStep('success');
-      setTimeout(() => {
-        onCreated();
-        onClose();
-      }, 2200);
+      // If PIX data returned, show QR code screen
+      if (billingType === 'PIX' && !result.asaas?.pix) {
+        throw new Error('Não foi possível gerar o QR Code PIX. Tente novamente.');
+      }
+
+      if (result.asaas?.pix) {
+        setPixInfo({
+          qrCodeImage: result.asaas.pix.qrCodeImage,
+          qrCodePayload: result.asaas.pix.qrCodePayload,
+          invoiceUrl: result.asaas.invoiceUrl,
+          paymentId: result.asaas.paymentId,
+        });
+        setStep('pix');
+        onCreated(); // refresh list in background
+      } else {
+        setStep('success');
+        setTimeout(() => {
+          onCreated();
+          onClose();
+        }, 2200);
+      }
     } catch (err: any) {
       setCreateError(err.message || 'Erro ao criar assinatura');
     } finally {
@@ -178,13 +241,16 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
   };
 
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
+  const selectedPlanPrice = selectedPlan ? getPlanPriceForCycle(selectedPlan, billingCycle) : null;
+  const selectedBillingCycleLabel = BILLING_CYCLE_LABELS[billingCycle];
+  const selectedBillingCycleSuffix = BILLING_CYCLE_SUFFIXES[billingCycle];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop animate-fade-in">
       <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl shadow-black/15 overflow-hidden animate-slide-up relative">
 
         {/* Step indicator — connected dots */}
-        {step !== 'success' && (
+        {step !== 'success' && step !== 'pix' && (
           <div className="px-7 pt-5 pb-1">
             <div className="flex items-center justify-between">
               {STEPS.map((s, i) => {
@@ -217,7 +283,7 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
         )}
 
         {/* close */}
-        {step !== 'success' && (
+        {step !== 'success' && step !== 'pix' && (
           <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 rounded-xl bg-black/5 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-black/10 transition-all z-10">
             <X size={15} />
           </button>
@@ -240,6 +306,73 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
               <p className="text-sm text-slate-500 text-center max-w-xs leading-relaxed">
                 O paciente receberá uma mensagem de boas-vindas via WhatsApp em instantes.
               </p>
+            </div>
+          )}
+
+          {/* ── PIX Payment ── */}
+          {step === 'pix' && pixInfo && selectedPlan && (
+            <div className="flex flex-col items-center py-6 animate-fade-in">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-4">
+                <QrCode size={24} className="text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-1">Pagamento via PIX</h3>
+              <p className="text-sm text-slate-500 mb-5 text-center">
+                Escaneie o QR Code ou copie o código para pagar a 1ª cobrança
+              </p>
+
+              {/* QR Code Image */}
+              <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 mb-4 shadow-sm">
+                <img
+                  src={`data:image/png;base64,${pixInfo.qrCodeImage}`}
+                  alt="QR Code PIX"
+                  className="w-52 h-52"
+                />
+              </div>
+
+              {/* Amount */}
+              <div className="text-center mb-4">
+                <span className="text-2xl font-bold text-slate-900">{fmt(selectedPlanPrice ?? selectedPlan.priceCents)}</span>
+                <span className="text-sm text-slate-500 ml-1">- {selectedPlan.name} · {selectedBillingCycleLabel}</span>
+              </div>
+
+              {/* Copy PIX code */}
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(pixInfo.qrCodePayload);
+                  setPixCopied(true);
+                  setTimeout(() => setPixCopied(false), 3000);
+                }}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all mb-3 ${
+                  pixCopied
+                    ? 'bg-emerald-100 text-emerald-700 border-2 border-emerald-300'
+                    : 'bg-slate-900 text-white hover:bg-slate-800'
+                }`}
+              >
+                {pixCopied ? (
+                  <><CheckCircle2 size={16} /> Código copiado!</>
+                ) : (
+                  <><QrCode size={16} /> Copiar código PIX</>
+                )}
+              </button>
+
+              {/* Invoice link */}
+              {pixInfo.invoiceUrl && (
+                <a
+                  href={pixInfo.invoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold border-2 border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 transition-all mb-3"
+                >
+                  <FileText size={16} /> Ver fatura completa
+                </a>
+              )}
+
+              <button
+                onClick={() => { onClose(); }}
+                className="text-sm text-slate-400 hover:text-slate-600 transition-colors mt-2"
+              >
+                Fechar
+              </button>
             </div>
           )}
 
@@ -501,22 +634,64 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
                           )}
                         </div>
                       </button>
-                      {isExpanded && features.length > 0 && (
-                        <div className="mt-1.5 ml-[60px] mr-2 animate-fade-in">
-                          <div className="bg-slate-50/80 rounded-xl p-3 space-y-1.5 border border-slate-100">
-                            {features.map((feat, fi) => (
-                              <div key={fi} className="flex items-start gap-2 text-xs text-slate-600">
-                                <CheckCircle2 size={12} className="text-emerald-500 shrink-0 mt-0.5" />
-                                <span>{feat}</span>
+                      {isExpanded && (
+                        <div className="mt-1.5 ml-[60px] mr-2 animate-fade-in space-y-2">
+                          {features.length > 0 && (
+                            <div className="bg-slate-50/80 rounded-xl p-3 space-y-1.5 border border-slate-100">
+                              {features.map((feat, fi) => (
+                                <div key={fi} className="flex items-start gap-2 text-xs text-slate-600">
+                                  <CheckCircle2 size={12} className="text-emerald-500 shrink-0 mt-0.5" />
+                                  <span>{feat}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {igsPlanDefaults[plan.slug] && igsPlanDefaults[plan.slug].length > 0 && (
+                            <div className="bg-blue-50/80 rounded-xl p-3 border border-blue-100">
+                              <p className="text-[9px] font-bold text-blue-500 uppercase tracking-widest mb-2">Assistências IGS incluídas</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {igsPlanDefaults[plan.slug].map(prod => (
+                                  <span key={prod.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold bg-blue-100/80 text-blue-700">
+                                    <Shield size={10} />
+                                    {prod.name}
+                                  </span>
+                                ))}
                               </div>
-                            ))}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   );
                 })}
               </div>
+
+              {selectedPlan && (
+                <div className="mb-6">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Periodicidade</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {getAvailableBillingCycles(selectedPlan).map(cycle => {
+                      const price = getPlanPriceForCycle(selectedPlan, cycle);
+                      return (
+                        <button
+                          key={cycle}
+                          onClick={() => setBillingCycle(cycle)}
+                          className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 text-xs font-semibold transition-all duration-200 ${
+                            billingCycle === cycle
+                              ? 'border-emerald-500 bg-emerald-50/60 text-emerald-700 shadow-sm'
+                              : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                          }`}
+                        >
+                          <span>{BILLING_CYCLE_LABELS[cycle]}</span>
+                          <span className="text-[11px] font-medium tabular-nums text-slate-400">
+                            {fmt(price ?? 0)}{BILLING_CYCLE_SUFFIXES[cycle]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Billing Type */}
               <div className="mb-6">
@@ -575,7 +750,8 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
                   { label: 'CPF', value: maskCpf(patientForm.cpf), mono: true },
                   { label: 'Telefone', value: maskPhone(patientForm.phone), mono: true },
                   { label: 'Plano', value: selectedPlan.name, bold: true },
-                  { label: 'Valor', value: fmt(selectedPlan.priceCents) + '/mês', accent: true },
+                  { label: 'Periodicidade', value: selectedBillingCycleLabel, accent: true },
+                  { label: 'Valor', value: `${fmt(selectedPlanPrice ?? selectedPlan.priceCents)}${selectedBillingCycleSuffix}`, accent: true },
                   { label: 'Cobrança', value: billingType === 'CREDIT_CARD' ? 'Cartão' : billingType },
                   ...(klingoPatient ? [{ label: 'Klingo ID', value: '#' + klingoPatient.klingoId, accent: true }] : []),
                 ].map((row, i) => (
@@ -606,6 +782,22 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* IGS benefits that will be auto-activated */}
+              {igsPlanDefaults[selectedPlan.slug] && igsPlanDefaults[selectedPlan.slug].length > 0 && (
+                <div className="mt-3 bg-blue-50/50 rounded-xl p-4 border border-blue-200/30">
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2.5">Assistências IGS (ativação automática)</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {igsPlanDefaults[selectedPlan.slug].map(prod => (
+                      <span key={prod.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-blue-100/80 text-blue-700">
+                        <Shield size={10} />
+                        {prod.name}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-blue-500 mt-2">Serão ativados automaticamente ao criar a assinatura</p>
                 </div>
               )}
 

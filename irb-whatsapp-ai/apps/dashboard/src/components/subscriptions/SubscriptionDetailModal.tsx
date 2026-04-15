@@ -10,14 +10,25 @@ import PatientDetailModal from './PatientDetailModal';
 
 /* ── types ─────────────────────────────────── */
 
+interface IGSProduct {
+  id: string;
+  name: string;
+  endpoint: string;
+}
+
 interface SubscriptionDetail {
   id: string;
   status: string;
   billingType: string;
+  billingCycle: string;
+  planPriceCents: number;
   nextDueDate: string | null;
   startedAt: string;
   cancelledAt: string | null;
+  asaasSubscriptionId: string | null;
   notes: string | null;
+  igsSyncedAt: string | null;
+  igsProductId: string | null;
   createdAt: string;
   patient: {
     id: string;
@@ -114,6 +125,28 @@ function fmtDateTime(d: string | null): string {
   return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function billingCycleLabel(cycle: string | null | undefined): string {
+  if (cycle === 'SEMIANNUALLY') return 'Semestral';
+  if (cycle === 'YEARLY') return 'Anual';
+  return 'Mensal';
+}
+
+function billingCycleSuffix(cycle: string | null | undefined): string {
+  if (cycle === 'SEMIANNUALLY') return '/6 meses';
+  if (cycle === 'YEARLY') return '/ano';
+  return '/mês';
+}
+
+/** Parse igsProductId — supports legacy single ID or JSON array */
+function parseIgsProductIds(igsProductId: string | null): string[] {
+  if (!igsProductId) return [];
+  try {
+    const parsed = JSON.parse(igsProductId);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  return [igsProductId]; // legacy single ID
+}
+
 type Tab = 'info' | 'payments' | 'actions';
 
 /* ── component ─────────────────────────────── */
@@ -125,8 +158,14 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
   const [showPatient, setShowPatient] = useState(false);
 
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [igsProducts, setIgsProducts] = useState<IGSProduct[]>([]);
   const [changingPlan, setChangingPlan] = useState(false);
+  const [changingIgs, setChangingIgs] = useState(false);
+  const [syncingAsaas, setSyncingAsaas] = useState(false);
+  const [asaasCpf, setAsaasCpf] = useState('');
+  const [asaasEmail, setAsaasEmail] = useState('');
   const [selectedNewPlan, setSelectedNewPlan] = useState<string | null>(null);
+  const [selectedIgsProducts, setSelectedIgsProducts] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
@@ -141,8 +180,13 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
   useEffect(() => { loadDetail(); }, [subscriptionId]);
 
   useEffect(() => {
-    if (tab === 'actions' && plans.length === 0) {
-      api.getPlans().then(d => setPlans(d.plans));
+    // Load IGS products early so we can show names on info tab
+    if (igsProducts.length === 0) api.getIGSProducts().then(setIgsProducts).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'actions') {
+      if (plans.length === 0) api.getPlans().then(d => setPlans(d.plans));
     }
   }, [tab]);
 
@@ -222,7 +266,9 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                             <span className={`w-1.5 h-1.5 rounded-full ${st!.dot}`} />
                             {st!.label}
                           </span>
-                          <span className="text-[11px] text-slate-400 font-medium">{data.plan.name} · {fmt(data.plan.priceCents)}/mês</span>
+                          <span className="text-[11px] text-slate-400 font-medium" title={billingCycleLabel(data.billingCycle)}>
+                            {data.plan.name} · {fmt(data.planPriceCents)}{billingCycleSuffix(data.billingCycle)}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -261,11 +307,22 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
               <div className="flex-1 overflow-y-auto p-7 modal-scroll">
 
                 {/* ── Tab: Info ── */}
-                {tab === 'info' && (
+                {tab === 'info' && (() => {
+                  const paidPayments = data.payments.filter(p => p.status === 'RECEIVED' || p.status === 'CONFIRMED');
+                  const pendingPayments = data.payments.filter(p => p.status === 'PENDING');
+                  const overduePayments = data.payments.filter(p => p.status === 'OVERDUE');
+                  const totalPaid = paidPayments.reduce((sum, p) => sum + p.amountCents, 0);
+                  const totalPending = pendingPayments.reduce((sum, p) => sum + p.amountCents, 0);
+                  const startDate = data.startedAt ? new Date(data.startedAt) : null;
+                  const now = new Date();
+                  const monthsActive = startDate ? Math.max(1, Math.round((now.getTime() - startDate.getTime()) / (30.44 * 24 * 60 * 60 * 1000))) : 0;
+                  const daysUntilRenewal = data.nextDueDate ? Math.ceil((new Date(data.nextDueDate + 'T12:00:00').getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
+
+                  return (
                   <div className="animate-fade-in space-y-5">
                     {/* Key metrics row */}
                     <div className="grid grid-cols-2 gap-3">
-                      <InfoCard label="Plano" value={data.plan.name} sub={fmt(data.plan.priceCents) + '/mês'} accent="emerald" />
+                      <InfoCard label="Plano" value={data.plan.name} sub={`${fmt(data.planPriceCents)}${billingCycleSuffix(data.billingCycle)}`} accent="emerald" />
                       <InfoCard
                         label="Cobrança"
                         value={data.billingType === 'CREDIT_CARD' ? 'Cartão' : data.billingType}
@@ -273,6 +330,54 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                         accent="blue"
                       />
                     </div>
+
+                    {/* Financial summary */}
+                    <div className="bg-gradient-to-r from-emerald-50/80 to-blue-50/80 rounded-2xl p-5 border border-emerald-100/60">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Resumo Financeiro</p>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <p className="text-lg font-bold text-emerald-700 tabular-nums">{fmt(totalPaid)}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">{paidPayments.length} pgto(s) recebido(s)</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-amber-600 tabular-nums">{fmt(totalPending)}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">{pendingPayments.length} pendente(s)</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-slate-800 tabular-nums">{monthsActive > 0 ? `${monthsActive} ${monthsActive === 1 ? 'mês' : 'meses'}` : '—'}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">tempo ativo</p>
+                        </div>
+                      </div>
+                      {overduePayments.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-rose-200/40 flex items-center gap-2">
+                          <AlertCircle size={13} className="text-rose-500" />
+                          <span className="text-xs font-semibold text-rose-600">{overduePayments.length} cobrança(s) vencida(s) — {fmt(overduePayments.reduce((s, p) => s + p.amountCents, 0))}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Renewal info */}
+                    {data.status === 'active' && daysUntilRenewal !== null && (
+                      <div className={`rounded-2xl p-4 border flex items-center gap-4 ${
+                        daysUntilRenewal <= 3 ? 'bg-amber-50/50 border-amber-200/50' : 'bg-emerald-50/30 border-emerald-200/50'
+                      }`}>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                          daysUntilRenewal <= 3 ? 'bg-amber-100' : 'bg-emerald-100'
+                        }`}>
+                          <RefreshCw size={18} className={daysUntilRenewal <= 3 ? 'text-amber-600' : 'text-emerald-600'} />
+                        </div>
+                        <div className="flex-1">
+                          <span className="text-sm font-bold text-slate-900">Próxima Renovação</span>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {daysUntilRenewal <= 0
+                              ? 'Vence hoje'
+                              : daysUntilRenewal === 1
+                                ? 'Vence amanhã'
+                                : `Em ${daysUntilRenewal} dias`} — {fmtDate(data.nextDueDate)} — {fmt(data.planPriceCents)}{billingCycleSuffix(data.billingCycle)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Timeline dates */}
                     <div className="relative bg-slate-50/80 rounded-2xl p-5 border border-slate-100">
@@ -310,6 +415,110 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                       )}
                     </div>
 
+                    {/* IGS Status + Sync Button */}
+                    <div className={`rounded-2xl p-4 border ${
+                      data.igsSyncedAt
+                        ? 'bg-blue-50/50 border-blue-200/50'
+                        : 'bg-slate-50/50 border-slate-200/50'
+                    }`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                          data.igsSyncedAt ? 'bg-blue-100' : 'bg-slate-100'
+                        }`}>
+                          <Shield size={18} className={data.igsSyncedAt ? 'text-blue-600' : 'text-slate-400'} />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-slate-900">IGS Assistencias</span>
+                            {data.igsSyncedAt ? (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                                Ativo
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">
+                                Nao sincronizado
+                              </span>
+                            )}
+                          </div>
+                          {data.igsSyncedAt && (
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Sincronizado em {fmtDateTime(data.igsSyncedAt)}
+                            </p>
+                          )}
+                        </div>
+                        {!data.igsSyncedAt && data.status !== 'cancelled' && (
+                          <button
+                            onClick={() => { setTab('actions'); setChangingIgs(true); }}
+                            className="px-3 py-2 rounded-xl text-xs font-semibold text-blue-700 bg-blue-100 hover:bg-blue-200 transition-all flex items-center gap-1.5 shrink-0"
+                          >
+                            <RefreshCw size={12} />
+                            Sincronizar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Asaas Status on Details tab */}
+                    <div className={`rounded-2xl p-4 border flex items-center gap-4 ${
+                      data.asaasSubscriptionId
+                        ? 'bg-green-50/50 border-green-200/50'
+                        : 'bg-amber-50/50 border-amber-200/50'
+                    }`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        data.asaasSubscriptionId ? 'bg-green-100' : 'bg-amber-100'
+                      }`}>
+                        <CreditCard size={18} className={data.asaasSubscriptionId ? 'text-green-600' : 'text-amber-500'} />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-slate-900">Cobranca Recorrente</span>
+                          {data.asaasSubscriptionId ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                              Asaas Ativo
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
+                              Sem cobranca
+                            </span>
+                          )}
+                        </div>
+                        {!data.asaasSubscriptionId && (
+                          <p className="text-[11px] text-amber-600 mt-0.5">Sem cobranca automática — sincronize via aba Acoes</p>
+                        )}
+                      </div>
+                      {!data.asaasSubscriptionId && data.status !== 'cancelled' && (
+                        <button
+                          onClick={() => { setTab('actions'); setSyncingAsaas(true); }}
+                          className="px-3 py-2 rounded-xl text-xs font-semibold text-green-700 bg-green-100 hover:bg-green-200 transition-all flex items-center gap-1.5 shrink-0"
+                        >
+                          <CreditCard size={12} />
+                          Ativar
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick Actions */}
+                    {data.status === 'active' && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setTab('payments')}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/60 hover:bg-emerald-100 transition-all"
+                        >
+                          <Receipt size={14} />
+                          Ver Pagamentos
+                        </button>
+                        <button
+                          onClick={() => setTab('actions')}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200/60 hover:bg-blue-100 transition-all"
+                        >
+                          <CreditCard size={14} />
+                          Gerar Cobranca
+                        </button>
+                      </div>
+                    )}
+
                     {data.notes && (
                       <div className="bg-amber-50/60 rounded-2xl p-4 border border-amber-200/40">
                         <div className="flex items-center gap-2 mb-1.5">
@@ -339,7 +548,8 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                       </div>
                     )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* ── Tab: Payments ── */}
                 {tab === 'payments' && (
@@ -412,13 +622,92 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                       </div>
                     )}
 
+                    {/* Asaas Sync (for legacy subscriptions) */}
+                    {!data.asaasSubscriptionId && data.status !== 'cancelled' && (
+                      <ActionCard
+                        icon={<CreditCard size={16} />}
+                        iconColor="text-green-600 bg-green-50"
+                        title="Sincronizar com Asaas"
+                        description="Criar assinatura recorrente no Asaas para cobrança automática mensal"
+                        actionLabel={!syncingAsaas ? 'Configurar' : undefined}
+                        onAction={() => setSyncingAsaas(true)}
+                      >
+                        {syncingAsaas && (
+                          <div className="space-y-3 mt-3 animate-fade-in">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CPF do paciente *</label>
+                              <input
+                                type="text"
+                                value={asaasCpf}
+                                onChange={e => setAsaasCpf(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                                placeholder="00000000000"
+                                className="w-full mt-1 px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Email (opcional)</label>
+                              <input
+                                type="email"
+                                value={asaasEmail}
+                                onChange={e => setAsaasEmail(e.target.value)}
+                                placeholder="paciente@email.com"
+                                className="w-full mt-1 px-3 py-2 rounded-xl border border-slate-200 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none"
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => { setSyncingAsaas(false); setAsaasCpf(''); setAsaasEmail(''); }} className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                                Cancelar
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (asaasCpf.length < 11) { setActionError('CPF deve ter 11 dígitos'); return; }
+                                  doAction(
+                                    () => api.syncSubscriptionAsaas(subscriptionId, { cpf: asaasCpf, email: asaasEmail || undefined }),
+                                    'Assinatura sincronizada com Asaas!',
+                                  ).then(() => { setSyncingAsaas(false); setAsaasCpf(''); setAsaasEmail(''); });
+                                }}
+                                disabled={asaasCpf.length < 11 || actionLoading}
+                                className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 transition-all flex items-center justify-center gap-1.5"
+                              >
+                                {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
+                                Criar Assinatura Asaas
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed">
+                              Isso criará uma assinatura recorrente mensal no Asaas ({data.billingType || 'PIX'}).
+                              O paciente receberá cobranças automáticas no dia 10 de cada mês.
+                            </p>
+                          </div>
+                        )}
+                      </ActionCard>
+                    )}
+
+                    {/* Asaas Active Badge */}
+                    {data.asaasSubscriptionId && (
+                      <div className="flex items-center gap-3 rounded-2xl p-4 bg-green-50/50 border border-green-200/50">
+                        <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+                          <CreditCard size={18} className="text-green-600" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-slate-900">Asaas Recorrente</span>
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                              Ativo
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5 font-mono">{data.asaasSubscriptionId}</p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Change Plan */}
                     {data.status === 'active' && (
                       <ActionCard
                         icon={<RefreshCw size={16} />}
                         iconColor="text-blue-600 bg-blue-50"
                         title="Trocar Plano"
-                        description={`Plano atual: ${data.plan.name} — ${fmt(data.plan.priceCents)}/mês`}
+                        description={`Plano atual: ${data.plan.name} — ${fmt(data.planPriceCents)}${billingCycleSuffix(data.billingCycle)}`}
                         actionLabel={changingPlan ? undefined : 'Alterar'}
                         onAction={() => setChangingPlan(true)}
                       >
@@ -490,6 +779,109 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                           {actionLoading && <Loader2 size={13} className="animate-spin" />}
                           {data.status === 'active' ? 'Suspender' : 'Reativar'}
                         </button>
+                      </ActionCard>
+                    )}
+
+                    {/* IGS Sync — Multi-select */}
+                    {data.status !== 'cancelled' && (
+                      <ActionCard
+                        icon={<Shield size={16} />}
+                        iconColor={data.igsSyncedAt ? 'text-blue-600 bg-blue-50' : 'text-slate-500 bg-slate-50'}
+                        title="IGS Assistencias"
+                        description={data.igsSyncedAt
+                          ? `Sincronizado em ${fmtDateTime(data.igsSyncedAt)}${parseIgsProductIds(data.igsProductId).length > 0 ? ` — ${parseIgsProductIds(data.igsProductId).length} benefício(s)` : ''}`
+                          : 'Paciente nao esta cadastrado na IGS'}
+                        actionLabel={!changingIgs ? (data.igsSyncedAt ? 'Gerenciar' : 'Sincronizar') : undefined}
+                        onAction={() => { setChangingIgs(true); setSelectedIgsProducts(parseIgsProductIds(data.igsProductId)); }}
+                      >
+                        {/* Show current synced products */}
+                        {!changingIgs && data.igsSyncedAt && parseIgsProductIds(data.igsProductId).length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {parseIgsProductIds(data.igsProductId).map(pid => {
+                              const prodName = igsProducts.find(p => p.id === pid)?.name || pid;
+                              return (
+                                <span key={pid} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/50">
+                                  <CheckCircle2 size={11} />
+                                  {prodName}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {changingIgs && (
+                          <div className="space-y-2 mt-3 animate-fade-in">
+                            {igsProducts.length > 0 && (
+                              <>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Selecione os benefícios IGS</p>
+                                <div className="grid grid-cols-1 gap-1.5 max-h-64 overflow-y-auto pr-1">
+                                  {igsProducts.map(prod => {
+                                    const isSelected = selectedIgsProducts.includes(prod.id);
+                                    return (
+                                      <button
+                                        key={prod.id}
+                                        onClick={() => {
+                                          setSelectedIgsProducts(prev =>
+                                            isSelected ? prev.filter(id => id !== prod.id) : [...prev, prod.id]
+                                          );
+                                        }}
+                                        className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all duration-200 ${
+                                          isSelected ? 'border-blue-500 bg-blue-50/50 shadow-sm' : 'border-slate-200 hover:border-slate-300'
+                                        }`}
+                                      >
+                                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border-2 transition-all ${
+                                          isSelected ? 'bg-blue-500 border-blue-500' : 'bg-white border-slate-300'
+                                        }`}>
+                                          {isSelected && <CheckCircle2 size={14} className="text-white" />}
+                                        </div>
+                                        <div className="flex-1">
+                                          <span className="font-semibold text-sm text-slate-900">{prod.name}</span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {selectedIgsProducts.length > 0 && (
+                                  <p className="text-[11px] text-blue-600 font-semibold">
+                                    {selectedIgsProducts.length} benefício(s) selecionado(s)
+                                  </p>
+                                )}
+                              </>
+                            )}
+                            <div className="flex gap-2 mt-3">
+                              <button onClick={() => setChangingIgs(false)} className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all">
+                                Cancelar
+                              </button>
+                              {data.igsSyncedAt ? (
+                                <button
+                                  onClick={() => doAction(
+                                    () => api.removeSubscriptionIGS(subscriptionId),
+                                    'Sincronizacao IGS removida',
+                                  ).then(() => setChangingIgs(false))}
+                                  disabled={actionLoading}
+                                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200/60 hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
+                                >
+                                  {actionLoading && <Loader2 size={13} className="animate-spin" />}
+                                  Remover IGS
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    if (selectedIgsProducts.length === 0) return;
+                                    doAction(
+                                      () => api.syncSubscriptionIGS(subscriptionId, selectedIgsProducts),
+                                      `${selectedIgsProducts.length} benefício(s) sincronizado(s) com IGS!`,
+                                    ).then(() => setChangingIgs(false));
+                                  }}
+                                  disabled={selectedIgsProducts.length === 0 || actionLoading}
+                                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 transition-all flex items-center justify-center gap-1.5"
+                                >
+                                  {actionLoading && <Loader2 size={13} className="animate-spin" />}
+                                  Sincronizar ({selectedIgsProducts.length})
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </ActionCard>
                     )}
 

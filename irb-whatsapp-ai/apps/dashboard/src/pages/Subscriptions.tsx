@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Plus, Search, CreditCard, QrCode, FileText,
-  Loader2, ChevronRight, TrendingUp, Users, AlertTriangle,
+  Loader2, ChevronRight, TrendingUp, Users, AlertTriangle, Shield,
 } from 'lucide-react';
 import { api } from '../services/api';
 import NewSubscriptionWizard from '../components/subscriptions/NewSubscriptionWizard';
@@ -13,8 +13,11 @@ interface Subscription {
   id: string;
   status: string;
   billingType: string;
+  billingCycle: string;
   nextDueDate: string | null;
   startedAt: string;
+  igsSyncedAt: string | null;
+  igsProductId: string | null;
   patientName: string | null;
   patientPhone: string;
   planName: string;
@@ -35,6 +38,24 @@ function fmt(cents: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
 }
 
+function billingCycleLabel(cycle: string | null | undefined): string {
+  if (cycle === 'SEMIANNUALLY') return 'Semestral';
+  if (cycle === 'YEARLY') return 'Anual';
+  return 'Mensal';
+}
+
+function billingCycleSuffix(cycle: string | null | undefined): string {
+  if (cycle === 'SEMIANNUALLY') return '/6 meses';
+  if (cycle === 'YEARLY') return '/ano';
+  return '/mês';
+}
+
+function monthlyEquivalent(cents: number, cycle: string | null | undefined): number {
+  if (cycle === 'SEMIANNUALLY') return Math.round(cents / 6);
+  if (cycle === 'YEARLY') return Math.round(cents / 12);
+  return cents;
+}
+
 function fmtDate(d: string | null): string {
   if (!d) return '—';
   return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR');
@@ -49,6 +70,7 @@ export default function Subscriptions() {
   const [search, setSearch] = useState('');
   const [showWizard, setShowWizard] = useState(false);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
+  const [igsStatus, setIgsStatus] = useState<'loading' | 'connected' | 'error'>('loading');
 
   const loadSubscriptions = useCallback(() => {
     setLoading(true);
@@ -58,6 +80,12 @@ export default function Subscriptions() {
   }, [filter, search]);
 
   useEffect(() => { loadSubscriptions(); }, [loadSubscriptions]);
+
+  useEffect(() => {
+    api.getIGSStatus()
+      .then(() => setIgsStatus('connected'))
+      .catch(() => setIgsStatus('error'));
+  }, []);
 
   const filters = [
     { key: 'all', label: 'Todas', count: subscriptions.length },
@@ -69,7 +97,9 @@ export default function Subscriptions() {
   // Quick stats
   const activeCount = subscriptions.filter(s => s.status === 'active').length;
   const overdueCount = subscriptions.filter(s => s.status === 'overdue').length;
-  const mrrCents = subscriptions.filter(s => s.status === 'active').reduce((sum, s) => sum + s.planPriceCents, 0);
+  const mrrCents = subscriptions
+    .filter(s => s.status === 'active')
+    .reduce((sum, s) => sum + monthlyEquivalent(s.planPriceCents, s.billingCycle), 0);
 
   return (
     <div className="px-8 py-7 max-w-[1400px] mx-auto">
@@ -92,8 +122,8 @@ export default function Subscriptions() {
       </div>
 
       {/* Quick Stats */}
-      {!loading && subscriptions.length > 0 && (
-        <div className="grid grid-cols-3 gap-4 mb-7 animate-fade-in">
+      {!loading && (
+        <div className="grid grid-cols-4 gap-4 mb-7 animate-fade-in">
           <div className="bg-white rounded-2xl border border-slate-100 p-4 flex items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
               <Users size={18} className="text-emerald-600" />
@@ -119,6 +149,43 @@ export default function Subscriptions() {
             <div>
               <p className={`text-2xl font-bold tabular-nums tracking-tight ${overdueCount > 0 ? 'text-rose-600' : 'text-slate-900'}`}>{overdueCount}</p>
               <p className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Inadimplentes</p>
+            </div>
+          </div>
+          <div className={`rounded-2xl border p-4 flex items-center gap-4 ${
+            igsStatus === 'connected'
+              ? 'bg-white border-emerald-200'
+              : igsStatus === 'error'
+              ? 'bg-white border-rose-200'
+              : 'bg-white border-slate-100'
+          }`}>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              igsStatus === 'connected' ? 'bg-emerald-50' : igsStatus === 'error' ? 'bg-rose-50' : 'bg-slate-50'
+            }`}>
+              <Shield size={18} className={
+                igsStatus === 'connected' ? 'text-emerald-600' : igsStatus === 'error' ? 'text-rose-500' : 'text-slate-400'
+              } />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-bold text-slate-900">IGS</p>
+                {igsStatus === 'loading' ? (
+                  <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500">
+                    <Loader2 size={10} className="animate-spin" />
+                    Verificando
+                  </span>
+                ) : igsStatus === 'connected' ? (
+                  <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Conectado
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    Offline
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 font-medium uppercase tracking-wider mt-0.5">Assistencias</p>
             </div>
           </div>
         </div>
@@ -181,6 +248,7 @@ export default function Subscriptions() {
                 <th className="text-left px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Valor</th>
                 <th className="text-left px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Cobrança</th>
                 <th className="text-left px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                <th className="text-left px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">IGS</th>
                 <th className="text-left px-4 py-3.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Vencimento</th>
                 <th className="w-10 pr-4"></th>
               </tr>
@@ -206,8 +274,10 @@ export default function Subscriptions() {
                     </td>
                     <td className="px-4 py-3.5 font-medium text-slate-700 text-[13px]">{sub.planName}</td>
                     <td className="px-4 py-3.5">
-                      <span className="font-bold text-slate-800 tabular-nums">{fmt(sub.planPriceCents)}</span>
-                      <span className="text-slate-400 font-normal text-[11px]">/mês</span>
+                      <span className="font-bold text-slate-800 tabular-nums" title={billingCycleLabel(sub.billingCycle)}>
+                        {fmt(sub.planPriceCents)}
+                      </span>
+                      <span className="text-slate-400 font-normal text-[11px]">{billingCycleSuffix(sub.billingCycle)}</span>
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="inline-flex items-center gap-1.5 text-slate-500 text-[13px]">
@@ -222,6 +292,18 @@ export default function Subscriptions() {
                         <span className={`w-1.5 h-1.5 rounded-full ${st.dot} ${sub.status === 'active' ? 'animate-pulse' : ''}`} />
                         {st.label}
                       </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {sub.igsSyncedAt ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100" title={`Sincronizado em ${fmtDate(sub.igsSyncedAt)}`}>
+                          <Shield size={11} />
+                          Ativo
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium text-slate-400">
+                          —
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 text-slate-500 tabular-nums text-[13px]">{fmtDate(sub.nextDueDate)}</td>
                     <td className="pr-4 py-3.5">

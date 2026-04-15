@@ -177,7 +177,8 @@ export async function patientRoutes(app: FastifyInstance) {
       id: schema.subscriptions.id,
       status: schema.subscriptions.status,
       planName: schema.plans.name,
-      planPriceCents: schema.plans.priceCents,
+      billingCycle: schema.subscriptions.billingCycle,
+      planPriceCents: sql<number>`coalesce(${schema.subscriptions.planPriceCents}, ${schema.plans.priceCents})`,
       nextDueDate: schema.subscriptions.nextDueDate,
     })
       .from(schema.subscriptions)

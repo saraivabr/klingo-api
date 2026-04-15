@@ -79,7 +79,14 @@ export const api = {
   getSubscriptions: (params?: { status?: string; search?: string; page?: string }) =>
     request<{ subscriptions: any[]; total: number }>(`/subscriptions?${new URLSearchParams(params as any)}`),
 
-  createSubscription: (data: { patientId: string; planId: string; billingType: string; cpf: string; email?: string }) =>
+  createSubscription: (data: {
+    patientId: string;
+    planId: string;
+    billingType: string;
+    billingCycle?: 'MONTHLY' | 'SEMIANNUALLY' | 'YEARLY';
+    cpf: string;
+    email?: string;
+  }) =>
     request<any>('/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
 
   cancelSubscription: (id: string) =>
@@ -87,6 +94,11 @@ export const api = {
 
   getSubscriptionPayments: (id: string) =>
     request<{ payments: any[] }>(`/subscriptions/${id}/payments`),
+
+  syncSubscriptionAsaas: (id: string, data: { cpf: string; email?: string }) =>
+    request<{ success: boolean; asaasSubscriptionId: string; nextDueDate: string; message: string }>(
+      `/subscriptions/${id}/asaas-sync`, { method: 'POST', body: JSON.stringify(data) }
+    ),
 
   // Finance
   getFinanceSummary: () =>
@@ -97,6 +109,12 @@ export const api = {
 
   getPlans: () =>
     request<{ plans: any[] }>('/finance/plans'),
+
+  updatePlan: (id: string, data: { priceCents?: number; priceSemestralCents?: number | null; priceAnnualCents?: number | null; name?: string; description?: string; features?: string[]; isActive?: boolean }) =>
+    request<any>(`/finance/plans/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 
   getSubscriptionDetail: (id: string) =>
     request<any>(`/subscriptions/${id}/detail`),
@@ -711,6 +729,45 @@ export const api = {
     request<any>('/users/me/password', { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
 
   // ===========================================
+  // IGS
+  getIGSStatus: () =>
+    request<{ status: string; message: string }>('/igs/status'),
+
+  getIGSProducts: () =>
+    request<{ id: string; name: string; endpoint: string }[]>('/igs/products'),
+
+  getIGSPlanDefaults: () =>
+    request<{ planSlug: string; productIds: string[]; products: { id: string; name: string }[] }[]>('/igs/plan-defaults'),
+
+  syncSubscriptionIGS: (subscriptionId: string, productIds: string[]) =>
+    request<any>(`/subscriptions/${subscriptionId}/igs-sync`, {
+      method: 'POST',
+      body: JSON.stringify({ productIds }),
+    }),
+
+  removeSubscriptionIGS: (subscriptionId: string) =>
+    request<any>(`/subscriptions/${subscriptionId}/igs-sync`, { method: 'DELETE' }),
+
+  // Hub
+  // ===========================================
+
+  getHubStatus: () =>
+    request<Record<string, any>>('/hub/status'),
+
+  getHubAIConfig: () =>
+    request<{
+      knowledgeBase: any[];
+      services: any[];
+      doctors: any[];
+      subscriptionStats: { total: number; active: number; pending: number; cancelled: number };
+    }>('/hub/ai-config'),
+
+  triggerKlingoSync: () =>
+    request<any>('/sync/klingo/all', { method: 'POST' }),
+
+  getKlingoSyncStatus: () =>
+    request<any>('/sync/klingo/status'),
+
   // CRM
   // ===========================================
 
