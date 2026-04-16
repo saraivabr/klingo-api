@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   X, Loader2, CheckCircle2, AlertCircle, ExternalLink,
   CreditCard, QrCode, FileText, Shield, Crown, Gem,
-  Calendar, Clock, StickyNote, RefreshCw, Pause, Play, XCircle,
+  Calendar, Clock, StickyNote, RefreshCw, XCircle,
   ChevronRight, Receipt, Zap, Ban,
 } from 'lucide-react';
 import { api } from '../../services/api';
@@ -751,34 +751,6 @@ export default function SubscriptionDetailModal({ subscriptionId, onClose, onUpd
                             </div>
                           </div>
                         )}
-                      </ActionCard>
-                    )}
-
-                    {/* Suspend / Reactivate */}
-                    {(data.status === 'active' || data.status === 'suspended') && (
-                      <ActionCard
-                        icon={data.status === 'active' ? <Pause size={16} /> : <Play size={16} />}
-                        iconColor={data.status === 'active' ? 'text-orange-600 bg-orange-50' : 'text-emerald-600 bg-emerald-50'}
-                        title={data.status === 'active' ? 'Suspender Assinatura' : 'Reativar Assinatura'}
-                        description={data.status === 'active'
-                          ? 'A assinatura será pausada e o paciente será notificado.'
-                          : 'A assinatura voltará ao status ativo e o paciente será notificado.'}
-                      >
-                        <button
-                          onClick={() => doAction(
-                            () => data.status === 'active' ? api.suspendSubscription(subscriptionId) : api.reactivateSubscription(subscriptionId),
-                            data.status === 'active' ? 'Assinatura suspensa' : 'Assinatura reativada',
-                          )}
-                          disabled={actionLoading}
-                          className={`w-full mt-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
-                            data.status === 'active'
-                              ? 'bg-orange-50 text-orange-700 border border-orange-200/60 hover:bg-orange-100'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60 hover:bg-emerald-100'
-                          }`}
-                        >
-                          {actionLoading && <Loader2 size={13} className="animate-spin" />}
-                          {data.status === 'active' ? 'Suspender' : 'Reativar'}
-                        </button>
                       </ActionCard>
                     )}
 

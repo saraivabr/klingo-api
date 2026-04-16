@@ -86,6 +86,7 @@ export const api = {
     billingCycle?: 'MONTHLY' | 'SEMIANNUALLY' | 'YEARLY';
     cpf: string;
     email?: string;
+    customPriceCents?: number;
   }) =>
     request<any>('/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
 

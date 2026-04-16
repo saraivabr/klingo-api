@@ -1,0 +1,73 @@
+{
+  "documento": "Validação de IDs de Produto IGS por Plano",
+  "fonte": "apps/api/src/services/igs-client.ts — PLAN_DEFAULT_IGS_PRODUCTS",
+  "geradoEm": "2026-04-15",
+  "observacao": "Cada plano envia para a IGS um conjunto DISTINTO de IDs de produto. Os IDs são únicos e específicos dentro do catálogo IGS (IGS_PRODUCTS).",
+  "catalogoProdutosIGS": {
+    "143508006": "Residencial Completo",
+    "143508007": "Orientação Nutricional",
+    "143508008": "Orientação Psicológica",
+    "143508010": "Orientação Fitness",
+    "143508011": "Desconto em Medicamentos",
+    "143508013": "Bem Estar",
+    "143508071": "Funeral Familiar R$ 5.000",
+    "143508072": "Assistência Pet",
+    "143508073": "Futura Mamãe",
+    "143508075": "Assistência Familiar (Kiddle Pass)",
+    "143508076": "Assistência Celular"
+  },
+  "planos": [
+    {
+      "referencia": "Plano A",
+      "slug": "prime-essencial",
+      "nome": "PRIME ESSENCIAL",
+      "klingoPlanId": 4,
+      "precoMensalCentavos": 10000,
+      "idsProdutoIGS": ["143508013"],
+      "produtosIGS": [
+        { "id": "143508013", "nome": "Bem Estar" }
+      ],
+      "totalProdutos": 1
+    },
+    {
+      "referencia": "Plano B",
+      "slug": "prime-plus",
+      "nome": "PRIME PLUS",
+      "klingoPlanId": 5,
+      "precoMensalCentavos": 15000,
+      "idsProdutoIGS": ["143508013", "143508075"],
+      "produtosIGS": [
+        { "id": "143508013", "nome": "Bem Estar" },
+        { "id": "143508075", "nome": "Assistência Familiar (Kiddle Pass)" }
+      ],
+      "totalProdutos": 2
+    },
+    {
+      "referencia": "Plano C",
+      "slug": "prime-elite",
+      "nome": "PRIME ELITE",
+      "klingoPlanId": 6,
+      "precoMensalCentavos": 20000,
+      "idsProdutoIGS": ["143508013", "143508075", "143508006", "143508071"],
+      "produtosIGS": [
+        { "id": "143508013", "nome": "Bem Estar" },
+        { "id": "143508075", "nome": "Assistência Familiar (Kiddle Pass)" },
+        { "id": "143508006", "nome": "Residencial Completo" },
+        { "id": "143508071", "nome": "Funeral Familiar R$ 5.000" }
+      ],
+      "totalProdutos": 4
+    }
+  ],
+  "validacao": {
+    "cadaPlanoTemIdEspecifico": true,
+    "planosCompartilhamProdutoComum": true,
+    "produtoComum": "Bem Estar (143508013) está em todos os 3 planos",
+    "produtosExclusivos": {
+      "prime-plus": ["Assistência Familiar — presente também no Elite"],
+      "prime-elite": ["Residencial Completo", "Funeral Familiar"]
+    },
+    "ambiguidadeRequisito": "O requisito 'cada plano possui um ID de produto específico' pode ser interpretado como (a) cada plano envia um conjunto distinto de IDs — JÁ ATENDIDO — ou (b) cada plano possui UM único ID exclusivo que o representa na IGS. Caso (b) seja necessário, é preciso definir com a IGS um produto-âncora por plano (ex.: 'Plano Essencial', 'Plano Plus', 'Plano Elite') e atualizar PLAN_DEFAULT_IGS_PRODUCTS."
+  },
+  "localizacaoDoMapeamentoNoCodigo": "apps/api/src/services/igs-client.ts linhas 146-166",
+  "endpointConsulta": "GET /api/igs/plan-defaults — retorna este mapeamento em runtime"
+}

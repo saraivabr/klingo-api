@@ -301,13 +301,14 @@ export async function subscriptionRoutes(app: FastifyInstance) {
 
   // Create subscription
   app.post('/', async (request, reply) => {
-    const { patientId, planId, billingType, billingCycle = 'MONTHLY', cpf, email } = request.body as {
+    const { patientId, planId, billingType, billingCycle = 'MONTHLY', cpf, email, customPriceCents } = request.body as {
       patientId: string;
       planId: string;
       billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD';
       billingCycle?: BillingCycle;
       cpf: string;
       email?: string;
+      customPriceCents?: number;
     };
 
     // Validate patient
@@ -327,10 +328,11 @@ export async function subscriptionRoutes(app: FastifyInstance) {
     const resolvedBillingCycle: BillingCycle = billingCycle === 'SEMIANNUALLY' || billingCycle === 'YEARLY'
       ? billingCycle
       : 'MONTHLY';
-    const planPriceCents = getPlanPriceForCycle(plan, resolvedBillingCycle);
+    const configuredPrice = getPlanPriceForCycle(plan, resolvedBillingCycle);
+    const planPriceCents = configuredPrice ?? (typeof customPriceCents === 'number' && customPriceCents > 0 ? customPriceCents : null);
     if (planPriceCents === null || planPriceCents === undefined) {
       return reply.status(400).send({
-        error: `O plano ${plan.name} não possui preço ${getBillingCycleLabel(resolvedBillingCycle).toLowerCase()} configurado`,
+        error: `O plano ${plan.name} não possui preço ${getBillingCycleLabel(resolvedBillingCycle).toLowerCase()} configurado. Informe um valor manualmente.`,
       });
     }
 

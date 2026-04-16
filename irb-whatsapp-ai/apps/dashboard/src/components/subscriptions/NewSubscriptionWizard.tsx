@@ -96,11 +96,14 @@ function getPlanPriceForCycle(plan: Plan, billingCycle: BillingCycle): number | 
   return plan.priceCents;
 }
 
-function getAvailableBillingCycles(plan: Plan): BillingCycle[] {
-  const cycles: BillingCycle[] = ['MONTHLY'];
-  if (plan.priceSemestralCents !== null && plan.priceSemestralCents !== undefined) cycles.push('SEMIANNUALLY');
-  if (plan.priceAnnualCents !== null && plan.priceAnnualCents !== undefined) cycles.push('YEARLY');
-  return cycles;
+function getAvailableBillingCycles(_plan: Plan): BillingCycle[] {
+  // Sempre exibir os 3 ciclos — permitir digitação livre quando preço não cadastrado
+  return ['MONTHLY', 'SEMIANNUALLY', 'YEARLY'];
+}
+
+function parseCurrencyInput(value: string): number {
+  const cleaned = value.replace(/[^\d,]/g, '').replace(',', '.');
+  return Math.round(parseFloat(cleaned) * 100) || 0;
 }
 
 /* ── component ─────────────────────────────── */
@@ -124,6 +127,7 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [billingType, setBillingType] = useState<'PIX' | 'BOLETO' | 'CREDIT_CARD'>('PIX');
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('MONTHLY');
+  const [customPriceInput, setCustomPriceInput] = useState<string>('');
   const [expandedFeatures, setExpandedFeatures] = useState<string | null>(null);
   const [igsPlanDefaults, setIgsPlanDefaults] = useState<Record<string, { id: string; name: string }[]>>({});
 
@@ -144,12 +148,9 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!selectedPlan) return;
-    const availableCycles = getAvailableBillingCycles(selectedPlan);
-    if (!availableCycles.includes(billingCycle)) {
-      setBillingCycle(availableCycles[0] || 'MONTHLY');
-    }
-  }, [selectedPlan, billingCycle]);
+    // Reset custom price quando muda plano ou ciclo
+    setCustomPriceInput('');
+  }, [selectedPlan?.id, billingCycle]);
 
   const handleKlingoSearch = async () => {
     const cpfClean = cpfSearch.replace(/\D/g, '');
@@ -192,6 +193,12 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
 
   const handleCreate = async () => {
     if (!selectedPlan) return;
+    const configuredPrice = getPlanPriceForCycle(selectedPlan, billingCycle);
+    const customPriceCents = customPriceInput ? parseCurrencyInput(customPriceInput) : 0;
+    if (configuredPrice === null && customPriceCents <= 0) {
+      setCreateError('Informe o valor manualmente para esta periodicidade');
+      return;
+    }
     setCreating(true);
     setCreateError('');
     try {
@@ -210,6 +217,7 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
         billingCycle,
         cpf: patientForm.cpf.replace(/\D/g, ''),
         email: patientForm.email || undefined,
+        ...(configuredPrice === null ? { customPriceCents } : {}),
       });
 
       // If PIX data returned, show QR code screen
@@ -241,7 +249,10 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
   };
 
   const currentStepIndex = STEPS.findIndex(s => s.key === step);
-  const selectedPlanPrice = selectedPlan ? getPlanPriceForCycle(selectedPlan, billingCycle) : null;
+  const configuredCyclePrice = selectedPlan ? getPlanPriceForCycle(selectedPlan, billingCycle) : null;
+  const customPriceCents = customPriceInput ? parseCurrencyInput(customPriceInput) : 0;
+  const needsCustomPrice = selectedPlan !== null && configuredCyclePrice === null;
+  const selectedPlanPrice = configuredCyclePrice ?? (needsCustomPrice && customPriceCents > 0 ? customPriceCents : null);
   const selectedBillingCycleLabel = BILLING_CYCLE_LABELS[billingCycle];
   const selectedBillingCycleSuffix = BILLING_CYCLE_SUFFIXES[billingCycle];
 
@@ -684,12 +695,31 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
                         >
                           <span>{BILLING_CYCLE_LABELS[cycle]}</span>
                           <span className="text-[11px] font-medium tabular-nums text-slate-400">
-                            {fmt(price ?? 0)}{BILLING_CYCLE_SUFFIXES[cycle]}
+                            {price !== null && price !== undefined ? fmt(price) : 'livre'}{BILLING_CYCLE_SUFFIXES[cycle]}
                           </span>
                         </button>
                       );
                     })}
                   </div>
+
+                  {needsCustomPrice && (
+                    <div className="mt-3 animate-fade-in">
+                      <label className="block text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-1.5">
+                        Valor {selectedBillingCycleLabel.toLowerCase()} (livre digitação)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-slate-400 font-medium">R$</span>
+                        <input
+                          type="text"
+                          value={customPriceInput}
+                          onChange={e => setCustomPriceInput(e.target.value.replace(/[^\d,]/g, ''))}
+                          placeholder="0,00"
+                          className="w-full pl-10 pr-4 py-3 bg-amber-50/60 border-2 border-amber-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition-all tabular-nums"
+                        />
+                      </div>
+                      <p className="text-[10px] text-amber-600 mt-1.5">Este plano não tem valor {selectedBillingCycleLabel.toLowerCase()} cadastrado — informe manualmente.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -720,7 +750,7 @@ export default function NewSubscriptionWizard({ onClose, onCreated }: Props) {
 
               <button
                 onClick={() => selectedPlan && setStep('confirm')}
-                disabled={!selectedPlan}
+                disabled={!selectedPlan || (needsCustomPrice && customPriceCents <= 0)}
                 className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white py-3 rounded-xl text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 Revisar <ChevronRight size={16} />
