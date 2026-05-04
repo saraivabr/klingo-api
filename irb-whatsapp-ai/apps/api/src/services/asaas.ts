@@ -6,6 +6,15 @@
  * Production: https://api.asaas.com/v3
  */
 
+function sanitizeAsaasPhone(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  let digits = raw.replace(/\D/g, '');
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    digits = digits.slice(2);
+  }
+  return digits.length === 10 || digits.length === 11 ? digits : undefined;
+}
+
 export interface AsaasCustomerRequest {
   name: string;
   cpfCnpj: string;
@@ -139,7 +148,12 @@ export class AsaasClient {
   // === Customers ===
 
   async createCustomer(data: AsaasCustomerRequest): Promise<AsaasCustomerResponse> {
-    return this.request('POST', '/customers', data);
+    const sanitized: AsaasCustomerRequest = {
+      ...data,
+      mobilePhone: sanitizeAsaasPhone(data.mobilePhone),
+      phone: sanitizeAsaasPhone(data.phone),
+    };
+    return this.request('POST', '/customers', sanitized);
   }
 
   async findCustomerByCpf(cpf: string): Promise<AsaasCustomerResponse | null> {

@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/confirmation.tsx","./src/expired.tsx","./src/loading.tsx","./src/patientform.tsx","./src/slotpicker.tsx","./src/main.tsx","./src/vite-env.d.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/confirmation.tsx","./src/examupload.tsx","./src/expired.tsx","./src/loading.tsx","./src/patientform.tsx","./src/progressbar.tsx","./src/slotpicker.tsx","./src/main.tsx","./src/vite-env.d.ts"],"version":"5.9.3"}

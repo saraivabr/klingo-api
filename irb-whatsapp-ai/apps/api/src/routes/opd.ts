@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '@irb/database';
 import { authMiddleware } from '../middleware/auth.js';
-import { eq, desc, and, gte, lte } from 'drizzle-orm';
+import { eq, desc, and, gte, lte, ilike, or } from 'drizzle-orm';
 import * as opdWorkflow from '../services/opd-workflow.js';
 
 export async function opdRoutes(app: FastifyInstance) {
@@ -11,14 +11,15 @@ export async function opdRoutes(app: FastifyInstance) {
 
   // GET /api/opd - List OPD visits with filters
   app.get('/', async (request) => {
-    const { 
-      page = 1, 
-      limit = 50, 
-      patientId, 
-      doctorId, 
+    const {
+      page = 1,
+      limit = 50,
+      patientId,
+      doctorId,
       status,
       startDate,
       endDate,
+      search,
     } = request.query as {
       page?: number;
       limit?: number;
@@ -27,6 +28,7 @@ export async function opdRoutes(app: FastifyInstance) {
       status?: string;
       startDate?: string;
       endDate?: string;
+      search?: string;
     };
 
     // Construir condições de filtro
@@ -36,6 +38,14 @@ export async function opdRoutes(app: FastifyInstance) {
     if (status) conditions.push(eq(schema.opdVisits.status, status));
     if (startDate) conditions.push(gte(schema.opdVisits.visitDate, startDate));
     if (endDate) conditions.push(lte(schema.opdVisits.visitDate, endDate));
+    if (search) {
+      conditions.push(
+        or(
+          ilike(schema.patients.name, `%${search}%`),
+          ilike(schema.doctors.name, `%${search}%`),
+        )!
+      );
+    }
 
     const baseQuery = db.select({
       id: schema.opdVisits.id,

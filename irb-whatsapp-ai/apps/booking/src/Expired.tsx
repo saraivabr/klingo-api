@@ -1,4 +1,4 @@
-const IRB_WHATSAPP = '5511975830146';
+const IRB_WHATSAPP = '5517997796014';
 
 export default function Expired({ message }: { message: string | null }) {
   return (

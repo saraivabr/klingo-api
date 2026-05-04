@@ -60,7 +60,7 @@ interface WorkflowStats {
     }>;
   };
   pharmacy: {
-    pendingPrescriptions: number;
+    totalPrescriptions: number;
     lowStockCount: number;
     lowStockMedicines: Array<{
       id: string;

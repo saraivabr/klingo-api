@@ -34,12 +34,15 @@ import { financeOpsRoutes } from './routes/finance-ops.js';
 import { userRoutes } from './routes/users.js';
 import { pdvRoutes } from './routes/pdv.js';
 import { crmRoutes } from './routes/crm.js';
+import { hubRoutes } from './routes/hub.js';
+import { publicSchedulingRoutes } from './routes/public-scheduling.js';
+import { examRequestRoutes } from './routes/exam-requests.js';
 import { websocketHandler } from './websocket/handler.js';
 
 const PORT = parseInt(process.env.API_PORT || '3001');
 
 async function start() {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' } });
+  const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' }, bodyLimit: 20 * 1024 * 1024 });
 
   // Plugins
   await app.register(cors, { origin: true });
@@ -102,6 +105,14 @@ async function start() {
     await scope.register(bookingRoutes, { prefix: '/api/booking' });
   });
   await app.register(teleconsultationRoutes, { prefix: '/api/teleconsultation' });
+  await app.register(async (scope) => {
+    scope.addHook('onRoute', (routeOptions) => { routeOptions.config = { ...routeOptions.config, rateLimit: { max: 60, timeWindow: '1 minute' } }; });
+    await scope.register(publicSchedulingRoutes, { prefix: '/api/public/scheduling' });
+  });
+  await app.register(async (scope) => {
+    scope.addHook('onRoute', (routeOptions) => { routeOptions.config = { ...routeOptions.config, rateLimit: { max: 10, timeWindow: '1 minute' } }; });
+    await scope.register(examRequestRoutes, { prefix: '/api/exam-requests' });
+  });
 
   // Protected routes
    await app.register(conversationRoutes, { prefix: '/api/conversations' });
@@ -125,6 +136,7 @@ await app.register(opdRoutes, { prefix: '/api/opd' });
   await app.register(userRoutes, { prefix: '/api/users' });
   await app.register(pdvRoutes, { prefix: '/api/pdv' });
   await app.register(crmRoutes, { prefix: '/api/crm' });
+  await app.register(hubRoutes, { prefix: '/api/hub' });
 
    // WebSocket
   await app.register(websocketHandler, { prefix: '/ws' });

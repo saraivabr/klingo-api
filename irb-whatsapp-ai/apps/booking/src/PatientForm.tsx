@@ -19,7 +19,7 @@ function formatSlotDisplay(iso: string): string {
   const weekday = d.toLocaleDateString('pt-BR', { weekday: 'long' });
   const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  return `${weekday}, ${date} as ${time}`;
+  return `${weekday}, ${date} \u00e0s ${time}`;
 }
 
 function formatCpf(value: string): string {
@@ -65,6 +65,19 @@ export default function PatientForm({
   const [sexo, setSexo] = useState<'M' | 'F' | ''>('');
   const [commitment, setCommitment] = useState(false);
 
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  const markTouched = (field: string) => setTouched((prev) => ({ ...prev, [field]: true }));
+
+  const nameError = (touched.name || submitAttempted) && !name.trim() ? 'Nome \u00e9 obrigat\u00f3rio' : '';
+  const cpfError = (touched.cpf || submitAttempted) && cpf.length > 0 && !isValidCpf(cpf) ? 'CPF deve ter 11 d\u00edgitos' : '';
+  const cpfRequiredError = (touched.cpf || submitAttempted) && cpf.length === 0 ? 'CPF \u00e9 obrigat\u00f3rio' : '';
+  const birthError = (touched.birthDate || submitAttempted) && birthDate.length > 0 && !isValidBirthDate(birthDate) ? 'Data inv\u00e1lida' : '';
+  const birthRequiredError = (touched.birthDate || submitAttempted) && birthDate.length === 0 ? 'Data de nascimento \u00e9 obrigat\u00f3ria' : '';
+  const sexoError = submitAttempted && sexo === '' ? 'Selecione o sexo' : '';
+  const commitmentError = submitAttempted && !commitment;
+
   const canSubmit = name.trim() &&
     isValidCpf(cpf) &&
     isValidBirthDate(birthDate) &&
@@ -74,6 +87,7 @@ export default function PatientForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitAttempted(true);
     if (!canSubmit) return;
     onConfirm(name.trim(), cpf.replace(/\D/g, ''), birthDate, sexo as 'M' | 'F', email.trim() || undefined);
   };
@@ -99,13 +113,13 @@ export default function PatientForm({
 
       <form onSubmit={handleSubmit} className="max-w-lg mx-auto px-5 py-6 space-y-5">
         <p className="text-sm text-irb-primary bg-irb-accent/30 px-4 py-3 rounded-xl">
-          Preencha seus dados para agilizar seu atendimento na recepcao
+          Preencha seus dados para agilizar seu atendimento na recep\u00e7\u00e3o
         </p>
 
         {/* Doctor selection */}
         {doctors.length > 1 && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Medico(a)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">M\u00e9dico(a)</label>
             <div className="space-y-2">
               {doctors.map((doc) => (
                 <button
@@ -136,10 +150,12 @@ export default function PatientForm({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onBlur={() => markTouched('name')}
             required
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
+            className={`w-full px-4 py-3 rounded-xl border-2 focus:outline-none text-sm ${nameError ? 'border-red-400 focus:border-red-400' : 'border-gray-200 focus:border-irb-gold'}`}
             placeholder="Digite seu nome"
           />
+          {nameError && <p className="text-red-500 text-xs mt-1">{nameError}</p>}
         </div>
 
         {/* CPF */}
@@ -153,10 +169,12 @@ export default function PatientForm({
             inputMode="numeric"
             value={cpf}
             onChange={(e) => setCpf(formatCpf(e.target.value))}
+            onBlur={() => markTouched('cpf')}
             required
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
+            className={`w-full px-4 py-3 rounded-xl border-2 focus:outline-none text-sm ${(cpfError || cpfRequiredError) ? 'border-red-400 focus:border-red-400' : 'border-gray-200 focus:border-irb-gold'}`}
             placeholder="000.000.000-00"
           />
+          {(cpfError || cpfRequiredError) && <p className="text-red-500 text-xs mt-1">{cpfError || cpfRequiredError}</p>}
         </div>
 
         {/* Birth date */}
@@ -170,10 +188,12 @@ export default function PatientForm({
             inputMode="numeric"
             value={birthDate}
             onChange={(e) => setBirthDate(formatBirthDate(e.target.value))}
+            onBlur={() => markTouched('birthDate')}
             required
-            className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-irb-gold focus:outline-none text-sm"
+            className={`w-full px-4 py-3 rounded-xl border-2 focus:outline-none text-sm ${(birthError || birthRequiredError) ? 'border-red-400 focus:border-red-400' : 'border-gray-200 focus:border-irb-gold'}`}
             placeholder="DD/MM/AAAA"
           />
+          {(birthError || birthRequiredError) && <p className="text-red-500 text-xs mt-1">{birthError || birthRequiredError}</p>}
         </div>
 
         {/* Sexo */}
@@ -203,6 +223,7 @@ export default function PatientForm({
               Feminino
             </button>
           </div>
+          {sexoError && <p className="text-red-500 text-xs mt-1">{sexoError}</p>}
         </div>
 
         {/* Phone (read-only) */}
@@ -234,15 +255,15 @@ export default function PatientForm({
         </div>
 
         {/* Commitment checkbox */}
-        <label className="flex items-start gap-3 cursor-pointer">
+        <label className={`flex items-start gap-3 cursor-pointer rounded-xl p-3 -mx-3 ${commitmentError ? 'ring-2 ring-red-400' : ''}`}>
           <input
             type="checkbox"
             checked={commitment}
             onChange={(e) => setCommitment(e.target.checked)}
-            className="mt-1 w-4 h-4 rounded border-gray-300 text-irb-primary focus:ring-irb-gold"
+            className={`mt-1 w-4 h-4 rounded text-irb-primary focus:ring-irb-gold ${commitmentError ? 'border-red-400' : 'border-gray-300'}`}
           />
           <span className="text-sm text-gray-600 leading-snug">
-            Me comprometo a comparecer na consulta agendada. Caso nao consiga, entrarei em contato para remarcar ou cancelar.
+            Me comprometo a comparecer na consulta agendada. Caso n\u00e3o consiga, entrarei em contato para remarcar ou cancelar.
           </span>
         </label>
 

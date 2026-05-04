@@ -136,6 +136,43 @@ export const IGS_PRODUCT_NAMES: Record<string, string> = {
   '143508076': 'Assistência Celular',
 };
 
+/**
+ * Mapeamento padrão: slug do plano → produtos IGS que devem ser auto-sincronizados.
+ *
+ * Essencial: Bem Estar (nutrição, psicologia, fitness, medicamentos)
+ * Plus: Bem Estar + Assistência Familiar
+ * Elite: Bem Estar + Assistência Familiar + Residencial Completo + Funeral Familiar
+ */
+export const PLAN_DEFAULT_IGS_PRODUCTS: Record<string, string[]> = {
+  'prime-essencial': [
+    IGS_PRODUCTS.BEM_ESTAR,
+  ],
+  'prime-plus': [
+    IGS_PRODUCTS.BEM_ESTAR,
+    IGS_PRODUCTS.ASSISTENCIA_FAMILIAR,
+  ],
+  'prime-elite': [
+    IGS_PRODUCTS.BEM_ESTAR,
+    IGS_PRODUCTS.ASSISTENCIA_FAMILIAR,
+    IGS_PRODUCTS.RESIDENCIAL_COMPLETO,
+    IGS_PRODUCTS.FUNERAL_FAMILIAR,
+  ],
+  'platinum': [
+    IGS_PRODUCTS.BEM_ESTAR,
+    IGS_PRODUCTS.ASSISTENCIA_FAMILIAR,
+    IGS_PRODUCTS.RESIDENCIAL_COMPLETO,
+    IGS_PRODUCTS.FUNERAL_FAMILIAR,
+  ],
+};
+
+/** @deprecated Use PLAN_DEFAULT_IGS_PRODUCTS instead */
+export const PLAN_DEFAULT_IGS_PRODUCT: Record<string, string> = {
+  'prime-essencial': IGS_PRODUCTS.BEM_ESTAR,
+  'prime-plus':      IGS_PRODUCTS.BEM_ESTAR,
+  'prime-elite':     IGS_PRODUCTS.BEM_ESTAR,
+  'platinum':        IGS_PRODUCTS.BEM_ESTAR,
+};
+
 /** Produtos que usam o endpoint /pets. */
 const PET_PRODUCTS = new Set<string>([IGS_PRODUCTS.ASSISTENCIA_PET]);
 

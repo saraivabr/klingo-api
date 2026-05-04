@@ -46,9 +46,27 @@ const DEBOUNCE_MS = 4000; // 4 seconds debounce window
 const STAFF_PHONES_ENV = process.env.STAFF_PHONES || '';
 const STAFF_PHONES = new Set<string>([
   '5511910064651',  // Dr. Flavio Barbieri
-  '5511975830146',  // IRB Recepção (self)
+  '5517997796014',  // IRB Recepção (self)
+  '5511988642668',  // Saraiva (admin/dev)
   ...STAFF_PHONES_ENV.split(',').map(p => p.trim()).filter(Boolean),
 ]);
+
+// Staff name patterns — pushNames that indicate internal staff
+// These are checked when the phone is not in STAFF_PHONES
+const STAFF_NAME_PATTERNS = /^(Dr\.?\s|Dra\.?\s)/i;
+const KNOWN_STAFF_NAMES = new Set([
+  'thalita goulart', 'mirela lima', 'mateus guirelli', 'rafaela oliveira',
+  'marcela', 'natália', 'natalia', 'mariana', 'pamela oliveira',
+  'jesus do saraiva', 'jesus cristo',
+]);
+
+function isStaffByName(pushName: string | null): boolean {
+  if (!pushName) return false;
+  const lower = pushName.toLowerCase().trim();
+  if (KNOWN_STAFF_NAMES.has(lower)) return true;
+  if (STAFF_NAME_PATTERNS.test(pushName)) return true;
+  return false;
+}
 
 interface IntakeJobData {
   phone: string;
@@ -131,13 +149,85 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
   const { phone, pushName, messageId, instanceName, timestamp, messageType, audioUrl, audioMessageKey, buttonResponse, pollVote } = job.data;
   let { text } = job.data;
 
-  // Handle button/list responses - use buttonResponse as text if present
-  // This allows the AI to see what option the user selected
+  // Handle button/list responses - map button IDs to meaningful text
+  // so the intent classifier and router can understand what the patient chose
+  const BUTTON_TEXT_MAP: Record<string, string> = {
+    // ─── Nível 1: Welcome menu ───
+    'menu_consulta': 'Quero agendar uma consulta',
+    'menu_estetica': 'Quero agendar um procedimento estetico',
+    'menu_med_trabalho': 'Quero agendar consulta de medicina do trabalho',
+    'menu_exames': 'Quero fazer exames',
+    'menu_associado': 'Quero saber sobre o plano Associado IRB Prime',
+    'menu_atendimento': 'Quero falar com um atendente humano',
+
+    // ─── Nível 2A: Tipos de consulta ───
+    'tipo_medica': 'Quero agendar uma consulta medica',
+    'tipo_odonto': 'Quero agendar consulta de odontologia',
+    'tipo_nutri': 'Quero agendar consulta de nutricao',
+    'tipo_fono': 'Quero agendar consulta de fonoaudiologia',
+    'tipo_psico': 'Quero agendar consulta de psicologia',
+
+    // ─── Nível 3A: Especialidades médicas ───
+    'esp_clinica': 'Quero agendar consulta de clinica medica',
+    'esp_cardio': 'Quero agendar consulta de cardiologia',
+    'esp_neuro': 'Quero agendar consulta de neurologia',
+    'esp_reumato': 'Quero agendar consulta de reumatologia',
+    'esp_uro': 'Quero agendar consulta de urologia',
+    'esp_vascular': 'Quero agendar consulta de cirurgia vascular',
+    'esp_orto': 'Quero agendar consulta de ortopedia',
+    'esp_gineco': 'Quero agendar consulta de ginecologia',
+    'esp_psiq': 'Quero agendar consulta de psiquiatria',
+    'esp_outra': 'Quero agendar consulta de outra especialidade',
+
+    // ─── Nível 2B: Procedimentos estéticos ───
+    'proc_botox': 'Quero agendar aplicacao de botox',
+    'proc_preenchimento': 'Quero agendar preenchimento facial',
+    'proc_harmonizacao': 'Quero agendar harmonizacao full face',
+    'proc_firmeza': 'Quero agendar procedimento de firmeza e rejuvenescimento com bioestimulador ou ultraformer',
+    'proc_rino': 'Quero agendar rinomodelacao',
+    'proc_lipo_papada': 'Quero agendar lipo de papada',
+    'proc_outro': 'Quero agendar outro procedimento estetico',
+
+    // ─── Nível 2D: Exames ───
+    'exame_imagem': 'Quero agendar exame de imagem',
+    'exame_lab': 'Quero agendar exame de laboratorio',
+    'exame_pedido': 'Tenho um pedido medico de exame',
+
+    // ─── Nível 2E: Associado ───
+    'assoc_quero': 'Quero me associar ao IRB Prime',
+    'assoc_ja_sou': 'Ja sou associado IRB Prime',
+    'assoc_saber': 'Quero saber mais sobre o plano Associado IRB Prime',
+
+    // ─── Utilitários (legado + gerais) ───
+    'agendar': 'Quero agendar uma consulta',
+    'atendente': 'Quero falar com um atendente humano',
+    'duvida': 'Tenho uma duvida',
+    'falar_recepcao': 'Quero falar com a recepcao',
+    'sim_continuar': 'Sim, quero continuar',
+    'sim_agendar': 'Sim, quero agendar',
+    'nao_obrigado': 'Nao, obrigado',
+    'depois': 'Depois eu volto',
+    'saber_mais': 'Quero saber mais',
+
+    // Media response buttons
+    'media_agendar': 'Quero agendar uma consulta',
+    'media_duvida': 'Tenho uma duvida',
+    'media_atendente': 'Quero falar com um atendente humano',
+
+    // Follow-up buttons
+    'sim_retomar': 'Quero retomar o agendamento',
+    'agendar_agora': 'Quero agendar agora',
+    'outro_horario': 'Quero ver outros horarios',
+    'mais_info': 'Quero mais informacoes',
+    'confirmar': 'Confirmado',
+    'remarcar': 'Preciso remarcar minha consulta',
+    'como_chegar': 'Como chegar na clinica',
+    'otima': 'A consulta foi otima',
+    'duvida_pos': 'Tenho uma duvida sobre a consulta',
+  };
   if (buttonResponse && !text) {
-    // The buttonResponse is the ID, but we also want to log the selection
-    text = `[Selecionou: ${buttonResponse}]`;
+    text = BUTTON_TEXT_MAP[buttonResponse] || `[Selecionou: ${buttonResponse}]`;
   } else if (buttonResponse && text) {
-    // If there's both text AND buttonResponse, append the selection context
     text = `${text} [Selecionou: ${buttonResponse}]`;
   }
 
@@ -165,9 +255,39 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
 
     // 2.1. Skip staff/internal numbers — they should not trigger AI
     const rawPhone = normalizedPhone.replace(/^\+/, '');
-    if (STAFF_PHONES.has(rawPhone)) {
+    if (STAFF_PHONES.has(rawPhone) || isStaffByName(pushName)) {
       console.log(`[message-intake] Skipping staff number: ${rawPhone} (${pushName})`);
       return { status: 'staff_ignored' };
+    }
+
+    // 2.2. Handle /novo command — close current conversation and start fresh
+    if (text.trim().toLowerCase() === '/novo') {
+      const openConv = await ConversationModel.findOne({
+        patientPhone: normalizedPhone,
+        status: { $ne: 'closed' },
+      }).sort({ lastMessageAt: -1 });
+
+      if (openConv) {
+        openConv.status = 'closed';
+        openConv.closedAt = new Date();
+        openConv.isAiHandling = false;
+        await openConv.save();
+        console.log(`[message-intake] /novo: closed conversation ${openConv._id} for ${normalizedPhone}`);
+      }
+
+      // Send confirmation directly via UAZAPI (bypass message-send queue to avoid conversationId issues)
+      const number = normalizedPhone.replace(/\D/g, '');
+      try {
+        await fetch(`${process.env.UAZAPI_URL || 'https://saraiva.uazapi.com'}/message/text`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'token': process.env.UAZAPI_TOKEN || '' },
+          body: JSON.stringify({ number, text: 'Conversa reiniciada! Me manda um oi que a gente começa de novo 😊' }),
+        });
+      } catch (err) {
+        console.error('[message-intake] /novo send failed:', (err as Error).message);
+      }
+
+      return { status: 'conversation_reset' };
     }
 
     // 2.5. Handle calendar button clicks directly (skip AI pipeline)
@@ -453,9 +573,21 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
       if (transcribed) {
         text = transcribed;
       } else {
-        // Could not transcribe - skip processing
+        // Could not transcribe - send friendly fallback instead of silent ignore
         console.log(`[intake] Could not transcribe audio from ${normalizedPhone}`);
-        return { status: 'ignored', reason: 'audio_transcription_failed' };
+        const existingConv = await ConversationModel.findOne({
+          patientPhone: normalizedPhone,
+          status: { $ne: 'closed' },
+        }).sort({ lastMessageAt: -1 });
+        if (existingConv) {
+          await messageSendQueue.add('send', {
+            conversationId: existingConv._id.toString(),
+            patientPhone: normalizedPhone,
+            text: 'Oi! Nao consegui ouvir bem o audio 😅 Pode me mandar por texto? Fica mais facil pra te ajudar rapido!',
+            instanceName,
+          }, { removeOnComplete: 100, removeOnFail: 500 });
+        }
+        return { status: 'audio_fallback_sent', reason: 'audio_transcription_failed' };
       }
     }
 
@@ -615,6 +747,38 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
       timestamp: new Date(),
     });
 
+    // 7.5. Auto-recovery: if conversation was escalated but no human responded in 10 min, reactivate AI
+    if (!conversation.isAiHandling && conversation.status === 'escalated') {
+      const lastAiOrStaffMsg = [...conversation.messages].reverse().find(
+        (m: any) => m.sender === 'ai' || m.sender === 'staff'
+      );
+      const escalatedAt = lastAiOrStaffMsg?.timestamp
+        ? new Date(lastAiOrStaffMsg.timestamp)
+        : conversation.lastMessageAt;
+      const minutesSinceEscalation = (Date.now() - new Date(escalatedAt).getTime()) / 60000;
+
+      if (minutesSinceEscalation > 10) {
+        console.log(`[message-intake] Auto-recovering escalated conversation for ${normalizedPhone} (${Math.round(minutesSinceEscalation)}min without human response)`);
+        conversation.isAiHandling = true;
+        conversation.status = 'active';
+        conversation.state = 'greeting';
+        await conversation.save();
+      } else {
+        // Patient messaged while escalated and before 10min timeout - send holding msg
+        const holdingKey = `escalation_holding:${normalizedPhone}`;
+        const alreadySent = await redis.get(holdingKey);
+        if (!alreadySent) {
+          await redis.set(holdingKey, '1', 'EX', 600); // 10min TTL, send only once
+          await messageSendQueue.add('send', {
+            conversationId: conversation._id.toString(),
+            patientPhone: normalizedPhone,
+            text: 'Sua conversa ja esta com nossa equipe! Aguarde um momentinho que alguem vai te atender 😊',
+            instanceName,
+          }, { removeOnComplete: 100, removeOnFail: 500 });
+        }
+      }
+    }
+
     // 8. If AI is handling, enqueue to AI pipeline with debounce
     if (conversation.isAiHandling) {
       const convId = conversation._id.toString();
@@ -637,6 +801,11 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
         }
       }
 
+      // Persist buttonResponse in Redis so it survives debounce replacement
+      if (buttonResponse) {
+        await redis.set(`debounce_btn:${normalizedPhone}`, buttonResponse, 'EX', 30);
+      }
+
       // Schedule a new debounced job
       const job = await aiPipelineQueue.add('process', {
         conversationId: convId,
@@ -646,6 +815,7 @@ export async function processMessageIntake(job: Job<IntakeJobData>) {
         text: '__DEBOUNCED__', // Placeholder - will be replaced by aggregated text
         instanceName,
         messageId,
+        buttonResponse: buttonResponse || undefined,
       }, {
         delay: DEBOUNCE_MS,
         removeOnComplete: 100,

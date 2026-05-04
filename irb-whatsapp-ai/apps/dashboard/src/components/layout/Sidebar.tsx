@@ -1,21 +1,19 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, Settings, LogOut, CreditCard, DollarSign, Video, Calendar, Stethoscope, Receipt, FlaskConical, Pill, Activity, ChevronDown, ChevronRight, ArrowDownCircle, ArrowUpCircle, TrendingUp, Users, ClipboardCheck, WalletCards, Building2, ShoppingCart, Columns3, Target, Megaphone } from 'lucide-react';
+import { Settings, LogOut, CreditCard, DollarSign, Calendar, Stethoscope, Receipt, Activity, ChevronDown, ChevronRight, ArrowDownCircle, ArrowUpCircle, TrendingUp, Users, ClipboardCheck, WalletCards, Building2, ShoppingCart, X, Zap, Crown, MessageCircle, BarChart3 } from 'lucide-react';
 import { useWebSocket } from '../../hooks/useWebSocket';
 
 const ALL_NAV_ITEMS = [
-  { to: '/', icon: Activity, label: 'Jornadas', key: 'journeys' },
-  { to: '/conversations', icon: LayoutDashboard, label: 'Conversas', key: 'conversations' },
-  { to: '/teleconsulta', icon: Video, label: 'Teleconsulta' },
+  { to: '/', icon: Activity, label: 'Painel', key: 'journeys' },
+  { to: '/conversations', icon: MessageCircle, label: 'Conversas', key: 'conversations' },
   { to: '/schedules', icon: Calendar, label: 'Agendas' },
   { to: '/opd', icon: Stethoscope, label: 'Consultas' },
   { to: '/billing', icon: Receipt, label: 'Faturamento' },
-  { to: '/lab', icon: FlaskConical, label: 'Laboratório' },
-  { to: '/pharmacy', icon: Pill, label: 'Farmácia' },
-  { to: '/metrics', icon: BarChart3, label: 'Métricas' },
-  { to: '/pdv', icon: ShoppingCart, label: 'PDV Cobranca' },
+  { to: '/pdv', icon: ShoppingCart, label: 'PDV Cobrança' },
   { to: '/subscriptions', icon: CreditCard, label: 'Assinaturas' },
-  { to: '/users', icon: Users, label: 'Usuarios', adminOnly: true as const },
+  { to: '/plans', icon: Crown, label: 'Planos' },
+  { to: '/indicators', icon: BarChart3, label: 'Indicadores' },
+  { to: '/users', icon: Users, label: 'Usuários', adminOnly: true as const },
 ] as const;
 
 function getUserAccess(): { role: string; permissions: string[] } {
@@ -30,11 +28,12 @@ function getUserAccess(): { role: string; permissions: string[] } {
   } catch { return { role: '', permissions: [] }; }
 }
 
-const CRM_SUBITEMS = [
-  { to: '/crm/pipeline', icon: Columns3, label: 'Pipeline', permission: 'crm.view' },
-  { to: '/crm/metrics', icon: Target, label: 'Metricas', permission: 'crm.view' },
-  { to: '/crm/campaigns', icon: Megaphone, label: 'Campanhas', permission: 'crm.view' },
-];
+// CRM oculto — fase futura
+// const CRM_SUBITEMS = [
+//   { to: '/crm/pipeline', icon: Columns3, label: 'Pipeline', permission: 'crm.view' },
+//   { to: '/crm/metrics', icon: Target, label: 'Metricas', permission: 'crm.view' },
+//   { to: '/crm/campaigns', icon: Megaphone, label: 'Campanhas', permission: 'crm.view' },
+// ];
 
 const FINANCE_SUBITEMS = [
   { to: '/finance', icon: DollarSign, label: 'Visão Geral', permission: 'finance.view' },
@@ -47,17 +46,19 @@ const FINANCE_SUBITEMS = [
   { to: '/finance/cadastros', icon: Building2, label: 'Cadastros', permission: 'finance.cadastros.view' },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export default function Sidebar({ onClose }: SidebarProps) {
   const { connected, unreadCount, resetUnread } = useWebSocket();
   const navigate = useNavigate();
   const location = useLocation();
   const [financeExpanded, setFinanceExpanded] = useState(location.pathname.startsWith('/finance'));
-  const [crmExpanded, setCrmExpanded] = useState(location.pathname.startsWith('/crm'));
   const { role: userRole, permissions } = getUserAccess();
   const canManageUsers = userRole === 'admin' || permissions.includes('users.manage');
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => !('adminOnly' in item && item.adminOnly) || canManageUsers);
   const visibleFinanceItems = FINANCE_SUBITEMS.filter((item) => userRole === 'admin' || permissions.includes(item.permission));
-  const visibleCrmItems = CRM_SUBITEMS.filter((item) => userRole === 'admin' || permissions.includes(item.permission));
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -69,9 +70,20 @@ export default function Sidebar() {
 
   return (
     <aside className="w-60 bg-slate-900 text-white flex flex-col shrink-0 h-screen sticky top-0">
-      <div className="px-5 py-6">
-        <h1 className="text-lg font-bold tracking-tight">IRB Prime Care</h1>
-        <p className="text-xs text-slate-400 mt-0.5">Atendimento IA</p>
+      <div className="px-5 py-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-lg font-bold tracking-tight">IRB Prime Care</h1>
+          <p className="text-xs text-slate-400 mt-0.5">Gestão Clínica</p>
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Fechar menu"
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
@@ -82,6 +94,7 @@ export default function Sidebar() {
             end={to === '/'}
             onClick={() => {
               if ('key' in rest && (rest as any).key === 'conversations') resetUnread();
+              onClose?.();
             }}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -100,46 +113,6 @@ export default function Sidebar() {
             )}
           </NavLink>
         ))}
-
-        {/* CRM Section with Submenu */}
-        <div>
-          <button
-            onClick={() => setCrmExpanded(!crmExpanded)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              location.pathname.startsWith('/crm')
-                ? 'bg-white/10 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <Target size={18} />
-              CRM
-            </div>
-            {crmExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </button>
-
-          {crmExpanded && (
-            <div className="ml-4 mt-1 space-y-0.5">
-              {visibleCrmItems.map(({ to, icon: Icon, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                      isActive
-                        ? 'bg-purple-600/20 text-purple-400 border-l-2 border-purple-400'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
-                    }`
-                  }
-                >
-                  <Icon size={16} />
-                  {label}
-                </NavLink>
-              ))}
-            </div>
-          )}
-        </div>
 
         {/* Finance Section with Submenu */}
         <div>
@@ -180,6 +153,20 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+
+        <NavLink
+          to="/hub"
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive
+                ? 'bg-white/10 text-white border-l-2 border-primary-400'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`
+          }
+        >
+          <Zap size={18} />
+          Hub
+        </NavLink>
 
         <NavLink
           to="/settings"

@@ -145,6 +145,7 @@ export default function Finance() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -158,6 +159,11 @@ export default function Finance() {
         setCashSummary(operationalSummary);
         setPayments(paymentResponse.payments);
         setPlans(plansResponse.plans);
+      })
+      .catch((err) => {
+        console.error('Finance load error:', err);
+        setError(err.message || 'Erro ao carregar dados financeiros');
+        setTimeout(() => setError(null), 5000);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -175,6 +181,11 @@ export default function Finance() {
 
   return (
     <div className="space-y-6 px-6 py-6">
+      {error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      )}
       <section className="overflow-hidden rounded-[28px] border border-slate-900 bg-slate-950 text-white shadow-2xl shadow-slate-950/15">
         <div className="grid gap-8 px-6 py-6 lg:grid-cols-[1.35fr_0.9fr] lg:px-8">
           <div>

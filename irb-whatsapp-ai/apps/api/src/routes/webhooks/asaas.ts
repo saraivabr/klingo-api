@@ -1,16 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { Queue } from 'bullmq';
 import { db, schema } from '@irb/database';
-import { QUEUE_NAMES } from '@irb/shared/constants';
-import { eq } from 'drizzle-orm';
-
-const redisConnection = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD || undefined,
-};
-
-const paymentNotificationQueue = new Queue(QUEUE_NAMES.PAYMENT_NOTIFICATION, { connection: redisConnection });
+import { eq, sql } from 'drizzle-orm';
 
 interface AsaasWebhookPayload {
   event: string;
@@ -33,11 +23,13 @@ export async function asaasWebhookRoutes(app: FastifyInstance) {
   app.post('/asaas', async (request, reply) => {
     // Validate webhook token
     const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
-    if (webhookToken) {
-      const headerToken = request.headers['asaas-access-token'];
-      if (headerToken !== webhookToken) {
-        return reply.status(401).send({ error: 'Invalid webhook token' });
-      }
+    if (!webhookToken) {
+      console.error('[asaas-webhook] ASAAS_WEBHOOK_TOKEN not set — rejecting request');
+      return reply.status(503).send({ error: 'Webhook not configured' });
+    }
+    const headerToken = request.headers['asaas-access-token'];
+    if (headerToken !== webhookToken) {
+      return reply.status(401).send({ error: 'Invalid webhook token' });
     }
 
     // Respond 200 immediately
@@ -78,14 +70,6 @@ async function findSubscriptionByAsaasId(asaasSubscriptionId: string) {
     .where(eq(schema.subscriptions.asaasSubscriptionId, asaasSubscriptionId))
     .limit(1);
   return sub;
-}
-
-async function getPatientPhone(patientId: string): Promise<string | null> {
-  const [patient] = await db.select()
-    .from(schema.patients)
-    .where(eq(schema.patients.id, patientId))
-    .limit(1);
-  return patient?.phone || null;
 }
 
 async function handlePaymentCreated(payment: AsaasWebhookPayload['payment'] & {}) {
@@ -133,16 +117,7 @@ async function handlePaymentConfirmed(payment: AsaasWebhookPayload['payment'] & 
         .where(eq(schema.subscriptions.id, sub.id));
     }
 
-    const phone = await getPatientPhone(sub.patientId);
-    if (phone) {
-      await paymentNotificationQueue.add('notify', {
-        type: 'payment_confirmed',
-        patientPhone: phone,
-        subscriptionId: sub.id,
-        paymentId: payment.id,
-        amountCents: Math.round(payment.value * 100),
-      }, { removeOnComplete: 50, removeOnFail: 100 });
-    }
+    console.log(`[asaas-webhook] Subscription payment confirmed: ${sub.id}, payment: ${payment.id}`);
     return;
   }
 
@@ -164,23 +139,21 @@ async function handlePaymentConfirmed(payment: AsaasWebhookPayload['payment'] & 
         notes: `Asaas ${payment.status}`,
       });
 
-      // Mark bill as paid
+      // Reconcile: calculate total paid vs net amount
+      const [{ total }] = await db.select({
+        total: sql<number>`COALESCE(SUM(amount_paid), 0)`,
+      })
+        .from(schema.billTransactions)
+        .where(eq(schema.billTransactions.billId, bill.id));
+
+      const totalPaid = Number(total);
+      const newStatus = totalPaid >= bill.netAmount ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
+
       await db.update(schema.bills)
-        .set({ status: 'paid' })
+        .set({ status: newStatus })
         .where(eq(schema.bills.id, bill.id));
 
-      console.log(`[asaas-webhook] PDV bill ${bill.billNumber} marked as paid`);
-
-      // Notify patient via WhatsApp
-      const phone = await getPatientPhone(bill.patientId);
-      if (phone) {
-        await paymentNotificationQueue.add('notify', {
-          type: 'payment_confirmed',
-          patientPhone: phone,
-          paymentId: payment.id,
-          amountCents,
-        }, { removeOnComplete: 50, removeOnFail: 100 });
-      }
+      console.log(`[asaas-webhook] PDV bill ${bill.billNumber} → ${newStatus} (paid: ${totalPaid}, net: ${bill.netAmount})`);
     }
   }
 }
@@ -203,18 +176,7 @@ async function handlePaymentOverdue(payment: AsaasWebhookPayload['payment'] & {}
     .set({ status: 'overdue' })
     .where(eq(schema.subscriptions.id, sub.id));
 
-  // Enqueue WhatsApp notification
-  const phone = await getPatientPhone(sub.patientId);
-  if (phone) {
-    await paymentNotificationQueue.add('notify', {
-      type: 'payment_overdue',
-      patientPhone: phone,
-      subscriptionId: sub.id,
-      paymentId: payment.id,
-      amountCents: Math.round(payment.value * 100),
-      dueDate: payment.dueDate,
-    }, { removeOnComplete: 50, removeOnFail: 100 });
-  }
+  console.log(`[asaas-webhook] Subscription ${sub.id} marked as overdue, payment: ${payment.id}`);
 }
 
 async function handlePaymentRefunded(payment: AsaasWebhookPayload['payment'] & {}) {

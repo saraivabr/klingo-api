@@ -8,21 +8,66 @@ import { createHash } from 'crypto';
 
 // Klingo procedimento IDs for "CONSULTA" per specialty (from Klingo internal catalog)
 const CONSULTA_PROCEDURE_MAP: Record<string, number> = {
+  // Especialidades médicas
   'cardiologia': 416,
+  'clinica medica': 1000,
+  'clinica geral': 1000,
+  'check-up': 1000,
+  'checkup': 1000,
   'gastroenterologia': 1293,
   'neurologia': 1312,
-  'reumatologia': 1314,
-  'dermatologia': 1317,
+  'reumatologia': 1340,
+  'dermatologia': 1281,
   'odontologia': 1105,
-  'psiquiatria': 1345,
+  'psiquiatria': 1322,
   'ginecologia': 1290,
+  'gineco': 1290,
   'ortopedia': 1301,
-  'urologia': 1339,
+  'urologia': 1341,
   'oftalmologia': 1295,
-  'pneumologia': 1321,
-  'pediatria': 1327,
-  'endocrinologia': 1302,
+  'pneumologia': 1318,
+  'pediatria': 1316,
+  'endocrinologia': 1027,
   'geriatria': 1343,
+  'cirurgia vascular': 1272,
+  'vascular': 1272,
+  // Consultas não-médicas
+  'fonoaudiologia': 1198,
+  'fono': 1198,
+  'nutricao': 1204,
+  'nutricionista': 1313,
+  'psicologia': 1321,
+  'psicoterapia': 1215,
+  'terapia': 1215,
+  'fisioterapia': 1218,
+  'acupuntura': 1214,
+  'medicina do trabalho': 484,
+  'ocupacional': 484,
+  // Estética (cada procedimento tem ID próprio — NÃO usar 1216 PACOTE que retorna 403)
+  'estetica': 1281,  // Consulta Dermatologia como fallback genérico
+  'botox': 1282,
+  'toxina botulinica': 1282,
+  'preenchimento': 1283,
+  'preenchimento facial': 1283,
+  'harmonizacao': 1283,
+  'harmonizacao full face': 1283,
+  'bioestimulador': 1284,
+  'firmeza': 1284,
+  'rejuvenescimento': 1284,
+  'ultraformer': 1284,
+  'peeling': 1266,
+  'rinomodelacao': 1269,
+  'rinoplastia': 1269,
+  'lipo de papada': 1283,
+  // Exames
+  'ultrassom': 1448,
+  'ultrassonografia': 1448,
+  'radiologia': 1439,
+  'raio-x': 1429,
+  'radiografia': 1429,
+  'laboratorio': 1431,
+  'exame de sangue': 1431,
+  'ecocardiograma': 1277,
 };
 
 function buildGoogleCalendarUrl(params: {
@@ -237,8 +282,82 @@ export async function bookingRoutes(app: FastifyInstance) {
       }
     }
 
-    // Priority 2: Hardcoded fallback
+    // Priority 1.5: Klingo AQL (internal API) — when external API returns 0 slots
+    if (slots.length === 0 && link.doctorId) {
+      try {
+        // Find doctor's klingo_id
+        const [doctor] = await db.select().from(schema.doctors)
+          .where(eq(schema.doctors.id, link.doctorId))
+          .limit(1);
+        const klingoId = doctor?.klingoId;
+
+        if (klingoId) {
+          const KLINGO_LOGIN = process.env.KLINGO_LOGIN || 'FELLIPE.SARAIVA';
+          const KLINGO_SENHA = process.env.KLINGO_SENHA || 'FELLIPE.SARAIVA1';
+          const KLINGO_DOMAIN = process.env.KLINGO_DOMAIN || 'irb';
+
+          // Login to get token
+          const loginRes = await fetch('https://api.klingo.app/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-DOMAIN': KLINGO_DOMAIN, 'X-PORTAL': '0', 'X-UNIDADE': '1' },
+            body: JSON.stringify({ login: KLINGO_LOGIN, senha: KLINGO_SENHA }),
+          });
+          const loginData = await loginRes.json() as any;
+          const aqlToken = loginData?.access_token;
+
+          if (aqlToken) {
+            const now = new Date();
+            const start = new Date(now); start.setDate(start.getDate() + 1);
+            const end = new Date(now); end.setDate(end.getDate() + 8);
+
+            const aqlRes = await fetch('https://api.klingo.app/api/aql?a=agendas.index', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${aqlToken}`,
+                'X-DOMAIN': KLINGO_DOMAIN, 'X-PORTAL': '0', 'X-UNIDADE': '1',
+              },
+              body: JSON.stringify({
+                q: [{ name: 'agendas.index', parms: { medico: klingoId, livres: 1, inicio: start.toISOString().split('T')[0], fim: end.toISOString().split('T')[0] } }],
+              }),
+            });
+            const aqlData = await aqlRes.json() as any;
+            const agendas = aqlData?.['agendas.index']?.data?.agendas || {};
+
+            for (const [doctorName, groups] of Object.entries(agendas)) {
+              for (const group of (groups as any[])) {
+                const dias = group.dias || {};
+                for (const [dateStr, daySlots] of Object.entries(dias)) {
+                  for (const slot of (daySlots as any[])) {
+                    if (slot.status !== 'livre') continue;
+                    const slotDate = new Date(`${slot.data}T${slot.hora}:00-03:00`);
+                    if (slotDate <= now) continue;
+                    slots.push({
+                      date: slot.data,
+                      time: slot.hora,
+                      dateTime: slotDate.toISOString(),
+                      source: 'klingo',
+                      klingoSlotId: `${slot.data}|${slot.id_medico}|${slot.id_agenda}|${slot.id_unidade_operacao}|${slot.hora}`,
+                    });
+                  }
+                }
+              }
+            }
+
+            slots = slots.sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()).slice(0, 12);
+            if (slots.length > 0) {
+              console.log(`[booking] Got ${slots.length} slots from AQL (internal API) for doctor ${klingoId}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[booking] AQL slots error:', err);
+      }
+    }
+
+    // Priority 2: Hardcoded fallback (only if both APIs failed)
     if (slots.length === 0) {
+      console.log(`[booking] No slots found for "${link.specialty}" — using fallback`);
       slots = generateFallbackSlots(service?.durationMinutes || 30);
     }
 

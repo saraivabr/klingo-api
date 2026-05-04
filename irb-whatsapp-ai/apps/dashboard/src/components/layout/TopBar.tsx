@@ -1,10 +1,23 @@
-import React from 'react';
-import { MessageSquare, AlertTriangle, TrendingUp, Clock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Users, CreditCard, AlertTriangle, DollarSign } from 'lucide-react';
 import MetricCard from '../shared/MetricCard';
-import { useMetrics } from '../../hooks/useMetrics';
+import { api } from '../../services/api';
 
 export default function TopBar() {
-  const { metrics, loading } = useMetrics();
+  const [data, setData] = useState<{
+    activeSubscriptions: number;
+    overdueSubscriptions: number;
+    monthRevenueCents: number;
+    overdueTotalCents: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getFinanceSummary()
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   if (loading) {
     return (
@@ -16,12 +29,14 @@ export default function TopBar() {
     );
   }
 
+  const fmt = (cents: number) => `R$ ${(cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 px-6 py-4">
-      <MetricCard icon={MessageSquare} label="Conversas Ativas" value={metrics.activeConversations} color="bg-blue-50 text-blue-600" />
-      <MetricCard icon={AlertTriangle} label="Escalações Pendentes" value={metrics.escalationsPending} color="bg-amber-50 text-amber-600" />
-      <MetricCard icon={TrendingUp} label="Mensagens Hoje" value={metrics.todayMessages} color="bg-emerald-50 text-emerald-600" />
-      <MetricCard icon={Clock} label="Tempo Médio" value={metrics.avgResponseTime} color="bg-violet-50 text-violet-600" />
+      <MetricCard icon={Users} label="Assinaturas Ativas" value={data?.activeSubscriptions ?? 0} color="bg-emerald-50 text-emerald-600" />
+      <MetricCard icon={DollarSign} label="Receita Mensal" value={fmt(data?.monthRevenueCents ?? 0)} color="bg-blue-50 text-blue-600" />
+      <MetricCard icon={AlertTriangle} label="Inadimplentes" value={data?.overdueSubscriptions ?? 0} color="bg-amber-50 text-amber-600" />
+      <MetricCard icon={CreditCard} label="Valor Inadimplente" value={fmt(data?.overdueTotalCents ?? 0)} color="bg-rose-50 text-rose-600" />
     </div>
   );
 }

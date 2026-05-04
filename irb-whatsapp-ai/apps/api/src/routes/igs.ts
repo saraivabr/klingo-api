@@ -5,6 +5,7 @@ import {
   IGSClient,
   IGS_PRODUCTS,
   IGS_PRODUCT_NAMES,
+  PLAN_DEFAULT_IGS_PRODUCTS,
   type IGSCustomerData,
   type IGSResidentialData,
   type IGSPetData,
@@ -96,6 +97,17 @@ export async function igsRoutes(app: FastifyInstance) {
       id,
       name,
       endpoint: client.endpointForProduct(id),
+    }));
+  });
+
+  // ----------------------------------------------------------
+  // GET /api/igs/plan-defaults — Benefícios IGS padrão por plano
+  // ----------------------------------------------------------
+  app.get('/plan-defaults', async () => {
+    return Object.entries(PLAN_DEFAULT_IGS_PRODUCTS).map(([planSlug, productIds]) => ({
+      planSlug,
+      productIds,
+      products: productIds.map(id => ({ id, name: IGS_PRODUCT_NAMES[id] })),
     }));
   });
 

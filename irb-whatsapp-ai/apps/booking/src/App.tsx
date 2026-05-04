@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import SlotPicker from './SlotPicker';
 import PatientForm from './PatientForm';
 import Confirmation from './Confirmation';
 import Expired from './Expired';
 import Loading from './Loading';
+import ProgressBar from './ProgressBar';
 
 interface BookingData {
   specialty: string;
@@ -16,6 +17,25 @@ interface BookingData {
 }
 
 type Step = 'loading' | 'slots' | 'form' | 'confirming' | 'done' | 'expired' | 'error';
+type PublicStep = 'exams' | 'request' | 'patient' | 'schedule' | 'payment' | 'review';
+
+interface Exam {
+  id: string;
+  name: string;
+  category?: string;
+  priceCents?: number;
+  durationMinutes?: number;
+}
+
+interface PublicSlot {
+  date: string;
+  time: string;
+  dateTime: string;
+  source?: 'klingo' | 'fallback' | 'none';
+  klingoSlotId?: string | number;
+  professional?: string;
+  professionalId?: string | number;
+}
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -37,8 +57,6 @@ export default function App() {
 
   useEffect(() => {
     if (!token) {
-      setStep('error');
-      setError('Link inválido');
       return;
     }
 
@@ -65,6 +83,10 @@ export default function App() {
         setError(err.message);
       });
   }, [token]);
+
+  if (!token) {
+    return <PublicExamScheduling />;
+  }
 
   const handleSlotSelect = (slot: { dateTime: string; source?: 'klingo' | 'fallback'; klingoSlotId?: string | number }) => {
     setSelectedSlot(slot.dateTime);
@@ -130,44 +152,579 @@ export default function App() {
     const slot = data?.slots.find(s => s.dateTime === selectedSlot);
     const doctor = data?.doctors.find(d => d.id === selectedDoctor);
     return (
-      <Confirmation
-        specialty={data?.specialty || ''}
-        doctorName={doctor?.name}
-        date={slot?.date || ''}
-        time={slot?.time || ''}
-        patientPhone={data?.patientPhone}
-      />
+      <>
+        <div className="bg-irb-bg">
+          <ProgressBar currentStep="done" />
+        </div>
+        <Confirmation
+          specialty={data?.specialty || ''}
+          doctorName={doctor?.name}
+          date={slot?.date || ''}
+          time={slot?.time || ''}
+          patientPhone={data?.patientPhone}
+        />
+      </>
     );
   }
 
   if (step === 'form' && data) {
     return (
-      <PatientForm
-        defaultName={data.patientName || ''}
-        phone={data.patientPhone || ''}
-        specialty={data.specialty}
-        selectedTime={selectedSlot || ''}
-        doctors={data.doctors}
-        selectedDoctor={selectedDoctor}
-        onSelectDoctor={setSelectedDoctor}
-        onConfirm={handleConfirm}
-        onBack={handleBack}
-        error={error}
-        service={data.service}
-      />
+      <>
+        <div className="bg-irb-bg">
+          <ProgressBar currentStep="form" />
+        </div>
+        <PatientForm
+          defaultName={data.patientName || ''}
+          phone={data.patientPhone || ''}
+          specialty={data.specialty}
+          selectedTime={selectedSlot || ''}
+          doctors={data.doctors}
+          selectedDoctor={selectedDoctor}
+          onSelectDoctor={setSelectedDoctor}
+          onConfirm={handleConfirm}
+          onBack={handleBack}
+          error={error}
+          service={data.service}
+        />
+      </>
     );
   }
 
   if (step === 'slots' && data) {
     return (
-      <SlotPicker
-        specialty={data.specialty}
-        slots={data.slots}
-        service={data.service}
-        onSelect={handleSlotSelect}
-      />
+      <>
+        <div className="bg-irb-bg">
+          <ProgressBar currentStep="slots" />
+        </div>
+        <SlotPicker
+          specialty={data.specialty}
+          slots={data.slots}
+          service={data.service}
+          onSelect={handleSlotSelect}
+        />
+      </>
     );
   }
 
   return null;
+}
+
+const fallbackExams: Exam[] = [
+  { id: '1431', name: 'Exame De Sangue', category: 'Laboratorio', priceCents: 8900, durationMinutes: 20 },
+  { id: '1448', name: 'Ultrassonografia', category: 'Imagem', priceCents: 18000, durationMinutes: 30 },
+  { id: '1429', name: 'Raio-X', category: 'Imagem', priceCents: 12000, durationMinutes: 20 },
+  { id: '1277', name: 'Ecocardiograma', category: 'Cardiologia', priceCents: 26000, durationMinutes: 40 },
+];
+
+function normalizeText(value: string) {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function formatMoney(cents?: number) {
+  if (!cents) return 'Valor sob consulta';
+  return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`;
+}
+
+function formatDate(dateTime: string) {
+  const date = new Date(dateTime);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+}
+
+function formatFullDate(dateTime: string) {
+  const date = new Date(dateTime);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+}
+
+function toBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result || '');
+      resolve(value.includes(',') ? value.split(',')[1] : value);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function PublicExamScheduling() {
+  const [currentStep, setCurrentStep] = useState<PublicStep>('exams');
+  const [exams, setExams] = useState<Exam[]>(fallbackExams);
+  const [examsSource, setExamsSource] = useState<'klingo' | 'fallback'>('fallback');
+  const [selectedExamIds, setSelectedExamIds] = useState<string[]>(['1431']);
+  const [query, setQuery] = useState('');
+  const [slots, setSlots] = useState<PublicSlot[]>([]);
+  const [slotsSource, setSlotsSource] = useState<'klingo' | 'fallback' | 'none'>('fallback');
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [patientName, setPatientName] = useState('');
+  const [patientPhone, setPatientPhone] = useState('');
+  const [patientCpf, setPatientCpf] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [email, setEmail] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('pix');
+  const [requestFile, setRequestFile] = useState<File | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [loadingExams, setLoadingExams] = useState(true);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [checkingPatient, setCheckingPatient] = useState(false);
+  const [patientLookup, setPatientLookup] = useState<'idle' | 'found' | 'not-found'>('idle');
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState<{ appointmentId: string } | null>(null);
+  const [error, setError] = useState('');
+
+  const selectedExams = useMemo(
+    () => exams.filter((exam) => selectedExamIds.includes(String(exam.id))),
+    [exams, selectedExamIds],
+  );
+  const mainExam = selectedExams[0] || exams[0] || fallbackExams[0];
+  const selectedSlot = slots.find((slot) => String(slot.klingoSlotId ?? slot.dateTime) === selectedSlotId) || slots[0];
+  const totalCents = selectedExams.reduce((sum, exam) => sum + (exam.priceCents || 0), 0);
+  const manualConfirmationRequired = examsSource === 'fallback' || selectedSlot?.source === 'fallback' || slotsSource === 'fallback';
+  const publicSteps: Array<{ id: PublicStep; label: string }> = [
+    { id: 'exams', label: 'Exames' },
+    { id: 'request', label: 'Pedido' },
+    { id: 'patient', label: 'Paciente' },
+    { id: 'schedule', label: 'Horario' },
+    { id: 'payment', label: 'Pagamento' },
+    { id: 'review', label: 'Revisao' },
+  ];
+  const currentStepIndex = publicSteps.findIndex((item) => item.id === currentStep);
+  const progress = Math.round(((currentStepIndex + 1) / publicSteps.length) * 100);
+
+  const visibleExams = useMemo(() => {
+    const search = normalizeText(query.trim());
+    if (!search) return exams.slice(0, 30);
+    return exams.filter((exam) => normalizeText(`${exam.name} ${exam.category || ''}`).includes(search)).slice(0, 30);
+  }, [exams, query]);
+
+  const groupedSlots = useMemo(() => {
+    return slots.slice(0, 24).reduce<Array<{ date: string; label: string; slots: PublicSlot[] }>>((groups, slot) => {
+      const date = slot.date || slot.dateTime.split('T')[0];
+      let group = groups.find((item) => item.date === date);
+      if (!group) {
+        group = { date, label: formatFullDate(slot.dateTime), slots: [] };
+        groups.push(group);
+      }
+      group.slots.push(slot);
+      return groups;
+    }, []);
+  }, [slots]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE}/api/public/scheduling/exams`)
+      .then((res) => res.json())
+      .then((payload) => {
+        if (!alive) return;
+        if (Array.isArray(payload.exams) && payload.exams.length > 0) {
+          setExams(payload.exams);
+          setExamsSource(payload.source === 'klingo' ? 'klingo' : 'fallback');
+          setSelectedExamIds([String(payload.exams[0].id)]);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setExams(fallbackExams);
+          setExamsSource('fallback');
+        }
+      })
+      .finally(() => {
+        if (alive) setLoadingExams(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!mainExam?.id) return;
+    let alive = true;
+    const start = new Date();
+    start.setDate(start.getDate() + 1);
+    const end = new Date();
+    end.setDate(end.getDate() + 14);
+    const params = new URLSearchParams({
+      exame: String(mainExam.id),
+      inicio: start.toISOString().split('T')[0],
+      fim: end.toISOString().split('T')[0],
+    });
+
+    setLoadingSlots(true);
+    fetch(`${API_BASE}/api/public/scheduling/slots?${params.toString()}`)
+      .then((res) => res.json())
+      .then((payload) => {
+        const nextSlots = Array.isArray(payload.slots) ? payload.slots : [];
+        if (!alive) return;
+        setSlots(nextSlots);
+        setSlotsSource(payload.source === 'klingo' ? 'klingo' : payload.source === 'none' ? 'none' : 'fallback');
+        setSelectedSlotId(nextSlots[0] ? String(nextSlots[0].klingoSlotId ?? nextSlots[0].dateTime) : '');
+      })
+      .catch(() => {
+        if (alive) {
+          setSlots([]);
+          setSlotsSource('none');
+          setSelectedSlotId('');
+        }
+      })
+      .finally(() => {
+        if (alive) setLoadingSlots(false);
+      });
+
+    return () => { alive = false; };
+  }, [mainExam?.id]);
+
+  const toggleExam = (examId: string) => {
+    setSelectedExamIds((current) => {
+      if (current.includes(examId)) {
+        return current.length === 1 ? current : current.filter((id) => id !== examId);
+      }
+      return [...current, examId];
+    });
+  };
+
+  const checkPatient = async () => {
+    const cpf = patientCpf.replace(/\D/g, '');
+    const phone = patientPhone.replace(/\D/g, '');
+    if (!cpf && !phone) return;
+    setCheckingPatient(true);
+    setPatientLookup('idle');
+    try {
+      const params = new URLSearchParams();
+      if (cpf) params.set('cpf', cpf);
+      if (!cpf && phone) params.set('phone', phone);
+      const response = await fetch(`${API_BASE}/api/public/scheduling/patient-search?${params.toString()}`);
+      const payload = await response.json();
+      if (payload.found && payload.patient) {
+        setPatientLookup('found');
+        setPatientName(payload.patient.name || patientName);
+        setEmail(payload.patient.email || email);
+        if (payload.patient.birthDate) setBirthDate(String(payload.patient.birthDate).slice(0, 10));
+      } else {
+        setPatientLookup('not-found');
+      }
+    } catch {
+      setPatientLookup('not-found');
+    } finally {
+      setCheckingPatient(false);
+    }
+  };
+
+  const uploadRequestIfNeeded = async () => {
+    if (!requestFile || requestId) return requestId;
+    const fileBase64 = await toBase64(requestFile);
+    const response = await fetch(`${API_BASE}/api/exam-requests/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patientPhone,
+        patientName,
+        fileBase64,
+        mimeType: requestFile.type,
+        fileName: requestFile.name,
+      }),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    setRequestId(payload.requestId || null);
+    return payload.requestId || null;
+  };
+
+  const goToStep = (targetStep: PublicStep) => {
+    setError('');
+    setCurrentStep(targetStep);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const advanceFrom = (sourceStep: PublicStep) => {
+    setError('');
+    if (sourceStep === 'exams' && selectedExams.length === 0) {
+      setError('Selecione pelo menos um exame.');
+      return;
+    }
+    if (sourceStep === 'request' && !requestFile) {
+      setError('Envie a foto do pedido medico para continuar.');
+      return;
+    }
+    if (sourceStep === 'patient' && (!patientName.trim() || !patientPhone.replace(/\D/g, ''))) {
+      setError('Informe nome e telefone do paciente.');
+      return;
+    }
+    if (sourceStep === 'schedule' && !selectedSlot) {
+      setError('Escolha uma data e horario.');
+      return;
+    }
+    const nextIndex = Math.min(publicSteps.length - 1, publicSteps.findIndex((item) => item.id === sourceStep) + 1);
+    goToStep(publicSteps[nextIndex].id);
+  };
+
+  const submitBooking = async () => {
+    setError('');
+    if (selectedExams.length === 0) {
+      setError('Selecione pelo menos um exame.');
+      goToStep('exams');
+      return;
+    }
+    if (!requestFile) {
+      setError('Envie a foto do pedido medico para continuar.');
+      goToStep('request');
+      return;
+    }
+    if (!patientName.trim() || !patientPhone.replace(/\D/g, '')) {
+      setError('Informe nome e telefone do paciente.');
+      goToStep('patient');
+      return;
+    }
+    if (!selectedSlot) {
+      setError('Escolha um horario disponivel.');
+      goToStep('schedule');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const uploadedRequestId = await uploadRequestIfNeeded();
+      if (!uploadedRequestId) {
+        throw new Error('Nao foi possivel validar o pedido medico enviado. Tente novamente ou fale pelo WhatsApp.');
+      }
+      const response = await fetch(`${API_BASE}/api/public/scheduling/book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientName,
+          patientPhone,
+          cpf: patientCpf,
+          birthDate,
+          email,
+          specialty: selectedExams.map((exam) => exam.name).join(', '),
+          doctorName: selectedSlot.professional,
+          doctorId: selectedSlot.professionalId ? String(selectedSlot.professionalId) : undefined,
+          slotDateTime: selectedSlot.dateTime,
+          slotSource: selectedSlot.source,
+          klingoSlotId: selectedSlot.klingoSlotId,
+          selectedExams,
+          paymentMethod,
+          requestId: uploadedRequestId,
+          requestFileName: requestFile?.name,
+          manualConfirmationRequired,
+          schedulingSource: selectedSlot.source || slotsSource,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Erro ao registrar agendamento.');
+      setDone({ appointmentId: payload.appointmentId });
+    } catch (err: any) {
+      setError(err.message || 'Erro ao registrar agendamento.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <div className="min-h-screen bg-irb-bg flex items-center justify-center px-5">
+        <div className="max-w-xl w-full bg-white rounded-3xl shadow-xl p-8 text-center space-y-5">
+          <div className="w-20 h-20 bg-irb-gold rounded-full flex items-center justify-center mx-auto shadow-lg">
+            <svg className="w-10 h-10 text-irb-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-irb-primary">Agendamento registrado!</h1>
+            <p className="text-gray-500 mt-2">A equipe IRB vai validar o registro no Klingo/WorkLab e enviar a confirmacao por e-mail ou WhatsApp.</p>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-left">
+            <p className="font-bold text-red-800">Pedido fisico obrigatorio</p>
+            <p className="text-sm text-red-700 mt-1">Apresente o pedido medico fisico na recepcao, mesmo que tenha enviado a foto pelo site.</p>
+          </div>
+          <a className="inline-flex justify-center bg-irb-primary text-white rounded-xl px-5 py-3 font-bold" href="https://wa.me/5511975830513">
+            Suporte via WhatsApp
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-irb-bg text-gray-900">
+      <header className="bg-white border-b border-gray-100">
+        <div className="max-w-7xl mx-auto px-5 py-4 flex items-center justify-between">
+          <div>
+            <p className="text-xl font-black text-irb-primary">IRB Prime Care</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Agendamento de exames</p>
+          </div>
+          <a className="text-sm font-bold text-irb-primary" href="https://wa.me/5511975830513">WhatsApp: (11) 97583-0513</a>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-5 py-6 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
+        <section className="space-y-6">
+          <div className="bg-white rounded-3xl shadow-sm p-6">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-irb-primary">SOL-IRB-0405</p>
+                <h1 className="text-3xl font-black mt-1">Agendar exames pelo site</h1>
+                <p className="text-gray-500 mt-2 max-w-2xl">Selecione exames, envie foto do pedido medico, valide seu cadastro e escolha data e horario.</p>
+              </div>
+              <div className="w-full md:w-48">
+                <div className="flex justify-between text-xs font-bold text-gray-400 mb-2"><span>Progresso</span><span>{progress}%</span></div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-irb-primary" style={{ width: `${progress}%` }} /></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl shadow-sm p-6">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-lg font-black">1. Exames e pedido medico</h2>
+                <p className="text-sm text-gray-500">{loadingExams ? 'Consultando catalogo Klingo...' : 'Catalogo consultado para busca de exames e precos.'}</p>
+              </div>
+              <span className="bg-teal-50 text-irb-primary rounded-full px-3 py-1 text-xs font-bold">Klingo</span>
+            </div>
+            <input className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm mb-4" placeholder="Buscar exame por nome..." value={query} onChange={(event) => setQuery(event.target.value)} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto">
+              {visibleExams.map((exam) => {
+                const active = selectedExamIds.includes(String(exam.id));
+                return (
+                  <button key={exam.id} type="button" onClick={() => toggleExam(String(exam.id))} className={`text-left border rounded-2xl p-4 min-h-[92px] ${active ? 'border-irb-primary bg-teal-50' : 'border-gray-200 hover:border-teal-300'}`}>
+                    <div className="flex justify-between gap-3">
+                      <div>
+                        <p className="font-black">{exam.name}</p>
+                        <p className="text-xs font-semibold text-gray-500 mt-1">{exam.category || 'Exame'}</p>
+                      </div>
+                      <span className={active ? 'text-irb-primary font-black' : 'text-gray-300'}>{active ? 'OK' : '+'}</span>
+                    </div>
+                    <p className="font-black text-irb-primary mt-3">{formatMoney(exam.priceCents)}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <label className="mt-5 flex items-center justify-between gap-4 rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 cursor-pointer">
+              <div>
+                <p className="text-sm font-bold">Enviar foto do pedido medico</p>
+                <p className="text-xs text-gray-500">{requestFile ? requestFile.name : 'JPG, PNG, GIF ou WEBP ate 10MB'}</p>
+              </div>
+              <span className="text-irb-primary font-black">Upload</span>
+              <input className="hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={(event) => setRequestFile(event.target.files?.[0] || null)} />
+            </label>
+          </div>
+
+          <div className="bg-white rounded-3xl shadow-sm p-6">
+            <h2 className="text-lg font-black">2. Dados do paciente</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">CPF</label>
+                <div className="flex gap-2">
+                  <input className="min-w-0 flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm" value={patientCpf} onChange={(event) => setPatientCpf(event.target.value)} placeholder="000.000.000-00" />
+                  <button type="button" onClick={checkPatient} disabled={checkingPatient} className="bg-gray-900 text-white rounded-xl px-4 text-sm font-bold">{checkingPatient ? '...' : 'Buscar'}</button>
+                </div>
+                {patientLookup === 'found' ? <p className="text-xs font-bold text-emerald-700 mt-2">Conta encontrada no Klingo.</p> : null}
+                {patientLookup === 'not-found' ? <p className="text-xs font-bold text-amber-700 mt-2">Cadastro nao encontrado. Os dados serao enviados para criacao/validacao.</p> : null}
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Telefone</label>
+                <input className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm" value={patientPhone} onChange={(event) => setPatientPhone(event.target.value)} placeholder="(11) 99999-9999" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Nome completo</label>
+                <input className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm" value={patientName} onChange={(event) => setPatientName(event.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">E-mail</label>
+                <input className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm" value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Nascimento</label>
+                <input className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} type="date" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl shadow-sm p-6">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-lg font-black">3. Data e horario</h2>
+                <p className="text-sm text-gray-500">{loadingSlots ? 'Sincronizando agenda Klingo...' : 'Horarios retornados da agenda online.'}</p>
+              </div>
+              <span className="bg-emerald-50 text-emerald-700 rounded-full px-3 py-1 text-xs font-bold">Tempo real</span>
+            </div>
+            {slots.length === 0 ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">Sem horario online para o exame selecionado. Use o WhatsApp para conferencia manual.</div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {slots.slice(0, 16).map((slot) => {
+                  const id = String(slot.klingoSlotId ?? slot.dateTime);
+                  const active = selectedSlotId === id;
+                  return (
+                    <button key={id} type="button" onClick={() => setSelectedSlotId(id)} className={`border rounded-2xl px-3 py-4 text-center ${active ? 'border-irb-primary bg-teal-50 text-irb-primary' : 'border-gray-200 hover:border-teal-300'}`}>
+                      <p className="text-xs font-bold uppercase tracking-widest">{formatDate(slot.dateTime)}</p>
+                      <p className="text-lg font-black mt-1">{slot.time}</p>
+                      {slot.professional ? <p className="text-[11px] text-gray-500 truncate mt-1">{slot.professional}</p> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
+          <div className="bg-white rounded-3xl shadow-sm p-6">
+            <h2 className="text-lg font-black">Conferencia final</h2>
+            <div className="space-y-4 mt-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Exames</p>
+                <ul className="mt-2 space-y-2">
+                  {selectedExams.map((exam) => (
+                    <li key={exam.id} className="flex justify-between gap-3 text-sm">
+                      <span className="font-semibold">{exam.name}</span>
+                      <span className="font-bold">{formatMoney(exam.priceCents)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Data e horario</p>
+                <p className="text-sm font-bold mt-1">{selectedSlot ? `${formatDate(selectedSlot.dateTime)} as ${selectedSlot.time}` : 'Selecione um horario'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Pagamento</p>
+                <div className="grid gap-2 mt-2">
+                  {[
+                    { id: 'pix', label: 'PIX' },
+                    { id: 'card', label: 'Cartao' },
+                    { id: 'clinic', label: 'Pagar na recepcao' },
+                  ].map((option) => (
+                    <button key={option.id} type="button" onClick={() => setPaymentMethod(option.id)} className={`border rounded-xl px-3 py-2 text-left text-sm font-bold ${paymentMethod === option.id ? 'border-irb-primary bg-teal-50 text-irb-primary' : 'border-gray-200'}`}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="border-t border-gray-100 pt-4 flex justify-between items-center">
+                <span className="font-black">Total</span>
+                <span className="text-2xl font-black text-irb-primary">{formatMoney(totalCents)}</span>
+              </div>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mt-5">
+              <p className="text-sm font-black text-red-800">Pedido fisico obrigatorio</p>
+              <p className="text-xs text-red-700 mt-1 leading-5">Mesmo enviando foto, o paciente deve apresentar o pedido medico fisico na recepcao.</p>
+            </div>
+            <div className="bg-gray-50 rounded-2xl p-4 mt-5">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Orientacoes</p>
+              <ul className="space-y-2 text-xs text-gray-600 leading-5">
+                <li>Leve documento com foto e carteirinha do convenio, se houver.</li>
+                <li>Chegue 15 minutos antes para cadastro e conferencia.</li>
+                <li>Alguns exames podem exigir jejum ou preparo especifico.</li>
+              </ul>
+            </div>
+            {error ? <p className="mt-4 bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm font-semibold">{error}</p> : null}
+            <button type="button" disabled={submitting} onClick={submitBooking} className="w-full bg-irb-primary text-white rounded-2xl px-5 py-4 font-black mt-5 disabled:opacity-50">
+              {submitting ? 'Registrando...' : 'Confirmar agendamento'}
+            </button>
+            <p className="text-[11px] text-gray-400 text-center leading-5 mt-3">O registro entra no sistema e a equipe valida a confirmacao final com Klingo/WorkLab quando necessario.</p>
+          </div>
+        </aside>
+      </main>
+    </div>
+  );
 }

@@ -29,9 +29,11 @@ export default function NewOPDVisitForm({ onClose, onSuccess }: NewOPDVisitFormP
 
   // Load doctors on mount
   useEffect(() => {
-    // In a real app, we'd fetch doctors from the API
-    // For now, we'll need to pass doctors as props or fetch from another endpoint
-    // setDoctors([...]);
+    api.getDoctors().then(res => {
+      setDoctors(res.doctors || []);
+    }).catch(err => {
+      console.error('Failed to load doctors:', err);
+    });
   }, []);
 
   const handlePatientSearch = async (search: string) => {
@@ -169,22 +171,26 @@ export default function NewOPDVisitForm({ onClose, onSuccess }: NewOPDVisitFormP
           {/* Doctor Selection */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Médico *</label>
-            <input
-              type="text"
-              placeholder="Nome do médico"
-              value={form.doctorName}
-              onChange={e => handleChange('doctorName', e.target.value)}
+            <select
+              value={form.doctorId}
+              onChange={e => {
+                const doc = doctors.find((d: any) => d.id === e.target.value);
+                setForm(prev => ({
+                  ...prev,
+                  doctorId: e.target.value,
+                  doctorName: doc?.name || '',
+                }));
+                setError(null);
+              }}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              ID do Médico: <input
-                type="text"
-                placeholder="UUID do médico"
-                value={form.doctorId}
-                onChange={e => setForm(prev => ({ ...prev, doctorId: e.target.value }))}
-                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
-              />
-            </p>
+            >
+              <option value="">-- Selecione um médico --</option>
+              {doctors.map((doc: any) => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.name}{doc.specialty ? ` - ${doc.specialty}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Visit Date */}

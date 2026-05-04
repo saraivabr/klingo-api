@@ -172,6 +172,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function AccountsReceivable() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<AccountReceivable[]>([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<Summary>({
@@ -222,21 +223,27 @@ export default function AccountsReceivable() {
   const [dueDateTo, setDueDateTo] = useState('');
 
   const loadOverview = async () => {
-    const [agingResponse, overdueResponse, insurersResponse, centersResponse, patientsResponse, doctorsResponse] = await Promise.all([
-      api.getReceivablesAging(),
-      api.getOverdueReceivables(),
-      api.getInsuranceProviders(),
-      api.getCostCenters(),
-      api.getPatients({ limit: '100' }),
-      api.getDoctors({ isActive: 'true' }),
-    ]);
+    try {
+      const [agingResponse, overdueResponse, insurersResponse, centersResponse, patientsResponse, doctorsResponse] = await Promise.all([
+        api.getReceivablesAging(),
+        api.getOverdueReceivables(),
+        api.getInsuranceProviders(),
+        api.getCostCenters(),
+        api.getPatients({ limit: '100' }),
+        api.getDoctors({ isActive: 'true' }),
+      ]);
 
-    setAging(agingResponse.buckets || []);
-    setOverdue(overdueResponse);
-    setInsuranceProviders(insurersResponse.items);
-    setCostCenters(centersResponse.items);
-    setPatients(patientsResponse.patients);
-    setDoctors(doctorsResponse.doctors);
+      setAging(agingResponse.buckets || []);
+      setOverdue(overdueResponse);
+      setInsuranceProviders(insurersResponse.items);
+      setCostCenters(centersResponse.items);
+      setPatients(patientsResponse.patients);
+      setDoctors(doctorsResponse.doctors);
+    } catch (err: any) {
+      console.error('AR overview load error:', err);
+      setError(err.message || 'Erro ao carregar dados');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const loadTable = async () => {
@@ -274,32 +281,50 @@ export default function AccountsReceivable() {
   }, [items]);
 
   const openDetail = async (id: string) => {
-    const response = await api.getAccountReceivable(id);
-    setSelectedItem(response);
-    setDetailOpen(true);
+    try {
+      const response = await api.getAccountReceivable(id);
+      setSelectedItem(response);
+      setDetailOpen(true);
+    } catch (err: any) {
+      console.error('Detail load error:', err);
+      setError(err.message || 'Erro ao carregar detalhes');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const openReceive = async (id: string) => {
-    const response = await api.getAccountReceivable(id);
-    const balance = (response.totalAmount || 0) - (response.receivedAmount || 0) - (response.glosaAmount || 0);
-    setSelectedItem(response);
-    setReceiveAmount((balance / 100).toFixed(2));
-    setReceiveMethod('transfer');
-    setReceiveOpen(true);
+    try {
+      const response = await api.getAccountReceivable(id);
+      const balance = (response.totalAmount || 0) - (response.receivedAmount || 0) - (response.glosaAmount || 0);
+      setSelectedItem(response);
+      setReceiveAmount((balance / 100).toFixed(2));
+      setReceiveMethod('transfer');
+      setReceiveOpen(true);
+    } catch (err: any) {
+      console.error('Open receive error:', err);
+      setError(err.message || 'Erro ao carregar recebimento');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const handleReceive = async () => {
     if (!selectedItem) return;
     const amount = Math.round(Number(receiveAmount.replace(',', '.')) * 100);
     if (!amount || amount <= 0) return;
-    await api.receivePayment(selectedItem.id, {
-      amount,
-      paymentMethod: receiveMethod,
-      paymentDate: new Date().toISOString().slice(0, 10),
-    });
-    setReceiveOpen(false);
-    setSelectedItem(null);
-    await loadAll();
+    try {
+      await api.receivePayment(selectedItem.id, {
+        amount,
+        paymentMethod: receiveMethod,
+        paymentDate: new Date().toISOString().slice(0, 10),
+      });
+      setReceiveOpen(false);
+      setSelectedItem(null);
+      await loadAll();
+    } catch (err: any) {
+      console.error('Receive payment error:', err);
+      setError(err.message || 'Erro ao registrar recebimento');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const handleCreateReceivable = async () => {
@@ -359,6 +384,11 @@ export default function AccountsReceivable() {
 
   return (
     <div className="space-y-6 px-6 py-6">
+      {error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      )}
       <section className="overflow-hidden rounded-[28px] border border-slate-900 bg-slate-950 text-white shadow-2xl shadow-slate-950/15">
         <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.35fr_0.95fr] lg:px-8">
           <div>

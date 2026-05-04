@@ -6,13 +6,13 @@ interface Props {
   patientPhone?: string | null;
 }
 
-const IRB_WHATSAPP = '5511975830146';
+const IRB_WHATSAPP = '5517997796014';
 
 export default function Confirmation({ specialty, doctorName, date, time }: Props) {
   const [year, month, day] = date.split('-').map(Number);
   const dateObj = new Date(year, month - 1, day);
   const weekday = dateObj.toLocaleDateString('pt-BR', { weekday: 'long' });
-  const formatted = `${weekday}, ${day}/${String(month).padStart(2, '0')} as ${time}`;
+  const formatted = `${weekday}, ${day}/${String(month).padStart(2, '0')} \u00e0s ${time}`;
 
   return (
     <div className="min-h-screen bg-irb-bg flex items-center justify-center px-5">
@@ -37,17 +37,17 @@ export default function Confirmation({ specialty, doctorName, date, time }: Prop
           </div>
           {doctorName && (
             <div>
-              <p className="text-xs text-irb-gold-dark uppercase tracking-wider font-medium">Medico(a)</p>
+              <p className="text-xs text-irb-gold-dark uppercase tracking-wider font-medium">M\u00e9dico(a)</p>
               <p className="font-semibold text-irb-primary">{doctorName}</p>
             </div>
           )}
           <div>
-            <p className="text-xs text-irb-gold-dark uppercase tracking-wider font-medium">Data e horario</p>
+            <p className="text-xs text-irb-gold-dark uppercase tracking-wider font-medium">Data e hor\u00e1rio</p>
             <p className="font-semibold text-irb-primary capitalize">{formatted}</p>
           </div>
           <div>
             <p className="text-xs text-irb-gold-dark uppercase tracking-wider font-medium">Local</p>
-            <p className="font-semibold text-irb-primary">Rua Boa Vista, 99 - 6o Andar, Sao Paulo</p>
+            <p className="font-semibold text-irb-primary">Rua Prudente de Moraes, 2025 - S\u00e3o Jos\u00e9 do Rio Preto, SP</p>
           </div>
         </div>
 
@@ -65,7 +65,7 @@ export default function Confirmation({ specialty, doctorName, date, time }: Prop
 
         <div className="flex items-center justify-center gap-2">
           <img src="/agendar/logo-irb.svg" alt="IRB" className="h-8 w-8" />
-          <p className="text-xs text-gray-400">IRB Prime Care - excellence in health</p>
+          <p className="text-xs text-gray-400">IRB Prime Care - Excel\u00eancia em Sa\u00fade</p>
         </div>
       </div>
     </div>

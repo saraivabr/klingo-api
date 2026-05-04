@@ -38,7 +38,7 @@ export interface ListTemplate {
  * Welcome message for first-time visitors or returning patients
  */
 export const welcomeButtons: ButtonTemplate = {
-  text: "Oii! Sou a Julia da IRB Prime Care 😊 O que te trouxe ate a gente?",
+  text: "Oii! Sou a Clara da IRB Prime Care 😊 O que te trouxe ate a gente?",
   buttons: [
     { id: "agendar", text: "Quero agendar" },
     { id: "conhecer", text: "Quero conhecer" },
@@ -64,7 +64,59 @@ export const triageButtons: ButtonTemplate = {
 };
 
 /**
- * Lista de categorias de sintomas para triagem
+ * Stage 1 - Symptom triage: broad category (max 3 buttons for WhatsApp)
+ */
+export const symptomStage1Buttons: ButtonTemplate = {
+  text: "Entendi! Me conta um pouquinho mais, o que ta sentindo?",
+  buttons: [
+    { id: "sintoma_dor", text: "Dor ou desconforto" },
+    { id: "sintoma_checkup", text: "Exames e check-up" },
+    { id: "sintoma_outro", text: "Outro sintoma" },
+  ],
+};
+
+/**
+ * Stage 2 - Specific symptoms based on Stage 1 selection
+ */
+export const symptomDorButtons: ButtonTemplate = {
+  text: "Onde esta a dor ou desconforto?",
+  buttons: [
+    { id: "cabeca", text: "Cabeca / Enxaqueca" },
+    { id: "coracao", text: "Coracao / Peito" },
+    { id: "costas", text: "Costas / Coluna" },
+  ],
+};
+
+export const symptomDorExtraButtons: ButtonTemplate = {
+  text: "Mais opcoes de dor ou desconforto:",
+  buttons: [
+    { id: "costas", text: "Articulacoes" },
+    { id: "digestao", text: "Digestao / Estomago" },
+    { id: "outro", text: "Outro (descreva)" },
+  ],
+};
+
+export const symptomCheckupButtons: ButtonTemplate = {
+  text: "Qual tipo de exame ou check-up?",
+  buttons: [
+    { id: "esp_clinica", text: "Check-up geral" },
+    { id: "exame_lab", text: "Exame de sangue" },
+    { id: "exame_imagem", text: "Exame de imagem" },
+  ],
+};
+
+export const symptomOutroButtons: ButtonTemplate = {
+  text: "Me conta um pouquinho mais:",
+  buttons: [
+    { id: "pele", text: "Problema de pele" },
+    { id: "urinario", text: "Problema respiratorio" },
+    { id: "outro", text: "Outro (descreva)" },
+  ],
+};
+
+/**
+ * @deprecated Use symptomStage1Buttons + stage 2 buttons instead
+ * Kept for backward compatibility
  */
 export const symptomCategoriesList: ListTemplate = {
   text: "Entendi! Me conta um pouquinho mais, onde ta o desconforto?",
@@ -261,7 +313,7 @@ export const postBookingButtons: ButtonTemplate = {
   buttons: [
     { id: "como_chegar", text: "Como chegar" },
     { id: "preparo", text: "Preparo necessario" },
-    { id: "ok", text: "Valeu, Julia!" },
+    { id: "ok", text: "Valeu, Clara!" },
   ],
 };
 
@@ -327,6 +379,11 @@ export const getTemplate = (
     welcome: welcomeButtons,
     triage: triageButtons,
     symptoms: symptomCategoriesList,
+    symptomStage1: symptomStage1Buttons,
+    symptomDor: symptomDorButtons,
+    symptomDorExtra: symptomDorExtraButtons,
+    symptomCheckup: symptomCheckupButtons,
+    symptomOutro: symptomOutroButtons,
     period: periodButtons,
     confirmation: (p) => confirmationButtons(p.date, p.time, p.doctor),
     specialties: specialtiesList,

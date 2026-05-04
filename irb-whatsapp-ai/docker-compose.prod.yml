@@ -74,7 +74,7 @@ services:
       - IGS_USERNAME=${IGS_USERNAME:-}
       - IGS_PASSWORD=${IGS_PASSWORD:-}
       - TELECONSULTA_BASE_URL=https://irb.saraiva.ai/consulta
-      - TEAM_NOTIFY_PHONE=${TEAM_NOTIFY_PHONE:-5511975830146}
+      - TEAM_NOTIFY_PHONE=${TEAM_NOTIFY_PHONE:-5517997796014}
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,13 +104,14 @@ services:
       - FOLLOW_UP_QUIET_HOUR_START=${FOLLOW_UP_QUIET_HOUR_START:-21}
       - FOLLOW_UP_QUIET_HOUR_END=${FOLLOW_UP_QUIET_HOUR_END:-8}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - BOOKING_BASE_URL=https://irb.saraiva.ai/agendar
       - KLINGO_APP_TOKEN=${KLINGO_APP_TOKEN}
       - KLINGO_EXTERNAL_BASE_URL=${KLINGO_EXTERNAL_BASE_URL:-https://api-externa.klingo.app}
       - TELECONSULTA_BASE_URL=https://irb.saraiva.ai/consulta
-      - DIRECTOR_PHONE=${DIRECTOR_PHONE:-5511975830146}
-      - FINANCE_PHONE=${FINANCE_PHONE:-5511975830146}
-      - TEAM_NOTIFY_PHONE=${TEAM_NOTIFY_PHONE:-5511975830146}
+      - DIRECTOR_PHONE=${DIRECTOR_PHONE:-5517997796014}
+      - FINANCE_PHONE=${FINANCE_PHONE:-5517997796014}
+      - TEAM_NOTIFY_PHONE=${TEAM_NOTIFY_PHONE:-5517997796014}
       - DASHBOARD_URL=https://irb.saraiva.ai
     depends_on:
       postgres:

@@ -138,8 +138,9 @@ async function callAnthropicFallback(params: {
   maxTokens?: number;
   temperature?: number;
   forceToolUse?: boolean;
+  forceToolName?: string;
 }): Promise<ClaudeResponse> {
-  const { systemPrompt, messages, tools, maxTokens = 2048, temperature = 0.5, forceToolUse = false } = params;
+  const { systemPrompt, messages, tools, maxTokens = 4096, temperature = 0.5, forceToolUse = false, forceToolName } = params;
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -149,15 +150,17 @@ async function callAnthropicFallback(params: {
   // Determine tool_choice
   let toolChoice: Anthropic.MessageCreateParams['tool_choice'] = undefined;
   if (anthropicTools && anthropicTools.length > 0) {
-    if (forceToolUse) {
-      toolChoice = { type: 'tool', name: 'send_interactive_message' };
+    if (forceToolUse && forceToolName) {
+      toolChoice = { type: 'tool', name: forceToolName };
+    } else if (forceToolUse) {
+      toolChoice = { type: 'any' };
     } else {
       toolChoice = { type: 'auto' };
     }
   }
 
   const response = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20241022',
     max_tokens: maxTokens,
     temperature,
     system: systemPrompt,
@@ -192,15 +195,17 @@ async function callAnthropicFallback(params: {
   };
 }
 
-export async function callClaude(params: {
+// callClaude is the legacy name — it actually calls OpenAI primary, Anthropic fallback
+export async function callLLM(params: {
   systemPrompt: string;
   messages: OpenAI.ChatCompletionMessageParam[];
   tools?: OpenAI.ChatCompletionTool[];
   maxTokens?: number;
   temperature?: number;
   forceToolUse?: boolean;
+  forceToolName?: string;
 }): Promise<ClaudeResponse> {
-  const { systemPrompt, messages, tools, maxTokens = 2048, temperature = 0.5, forceToolUse = false } = params;
+  const { systemPrompt, messages, tools, maxTokens = 4096, temperature = 0.5, forceToolUse = false, forceToolName } = params;
 
   // --- Primary: OpenAI ---
   try {
@@ -209,11 +214,13 @@ export async function callClaude(params: {
       ...messages,
     ];
 
-    // Determine tool_choice: force send_interactive_message if requested
+    // Determine tool_choice: force specific tool if requested
     let toolChoice: "auto" | "required" | { type: "function"; function: { name: string } } | undefined = undefined;
     if (tools && tools.length > 0) {
-      if (forceToolUse) {
-        toolChoice = { type: "function", function: { name: "send_interactive_message" } };
+      if (forceToolUse && forceToolName) {
+        toolChoice = { type: "function", function: { name: forceToolName } };
+      } else if (forceToolUse) {
+        toolChoice = "required";
       } else {
         toolChoice = "auto";
       }
@@ -264,4 +271,6 @@ export async function callClaude(params: {
   }
 }
 
+// Backward-compatible alias
+export const callClaude = callLLM;
 export { openai };

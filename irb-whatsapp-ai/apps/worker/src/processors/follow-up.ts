@@ -80,10 +80,10 @@ const ATTENTION_RECOVERY: Array<{
 
       if (context === 'agendamento') {
         return {
-          text: `${greeting}! Julia aqui 😊 Vi que a gente tava vendo horarios. Quer que eu continue de onde paramos?`,
+          text: `${greeting}! Clara aqui 😊 Vi que a gente tava vendo horarios. Quer que eu continue de onde paramos?`,
           interactive: {
             type: 'buttons',
-            text: `${greeting}! Julia aqui 😊 Vi que a gente tava vendo horarios. Quer que eu continue de onde paramos?`,
+            text: `${greeting}! Clara aqui 😊 Vi que a gente tava vendo horarios. Quer que eu continue de onde paramos?`,
             buttons: [
               { id: 'sim_continuar', text: 'Sim, quero agendar' },
               { id: 'outro_horario', text: 'Ver outros horarios' },
@@ -96,10 +96,10 @@ const ATTENTION_RECOVERY: Array<{
 
       if (context === 'precos') {
         return {
-          text: `${greeting}! Julia aqui 😊 Ficou alguma duvida sobre os valores? Posso te ajudar!`,
+          text: `${greeting}! Clara aqui 😊 Ficou alguma duvida sobre os valores? Posso te ajudar!`,
           interactive: {
             type: 'buttons',
-            text: `${greeting}! Julia aqui 😊 Ficou alguma duvida sobre os valores? Posso te ajudar!`,
+            text: `${greeting}! Clara aqui 😊 Ficou alguma duvida sobre os valores? Posso te ajudar!`,
             buttons: [
               { id: 'agendar_agora', text: 'Quero agendar' },
               { id: 'mais_info', text: 'Mais informacoes' },
@@ -111,10 +111,10 @@ const ATTENTION_RECOVERY: Array<{
       }
 
       return {
-        text: `${greeting}! Julia aqui 😊 Ficou alguma duvida? Em menos de 1 minuto a gente resolve!`,
+        text: `${greeting}! Clara aqui 😊 Ficou alguma duvida? Em menos de 1 minuto a gente resolve!`,
         interactive: {
           type: 'buttons',
-          text: `${greeting}! Julia aqui 😊 Ficou alguma duvida? Em menos de 1 minuto a gente resolve!`,
+          text: `${greeting}! Clara aqui 😊 Ficou alguma duvida? Em menos de 1 minuto a gente resolve!`,
           buttons: [
             { id: 'agendar', text: 'Quero agendar' },
             { id: 'duvida', text: 'Tenho uma duvida' },
@@ -126,69 +126,12 @@ const ATTENTION_RECOVERY: Array<{
     },
   },
   {
-    // Tentativa 2: 4 horas — RECOMPENSA
-    delay: 4 * 60 * 60 * 1000,
-    getMessage: (name, context) => {
-      const greeting = name ? `Oi ${name}` : 'Oi';
-
-      if (context === 'agendamento') {
-        return {
-          text: `${greeting}! Julia da IRB 😊 Sabia que o retorno e gratis em 30 dias? Nossos pacientes adoram isso. Quer continuar o agendamento?`,
-          interactive: {
-            type: 'buttons',
-            text: `${greeting}! Julia da IRB 😊 Sabia que o retorno e gratis em 30 dias? Nossos pacientes adoram isso. Quer continuar o agendamento?`,
-            buttons: [
-              { id: 'sim_agendar', text: 'Sim, vamos agendar!' },
-              { id: 'saber_mais', text: 'Quero saber mais' },
-              { id: 'nao_obrigado', text: 'Nao, obrigado' },
-            ],
-            footerText: 'IRB Prime Care',
-          },
-        };
-      }
-
-      return {
-        text: `${greeting}! Julia da IRB 😊 Nossos medicos sao referencia na area e o atendimento e super acolhedor. Quer marcar?`,
-        interactive: {
-          type: 'buttons',
-          text: `${greeting}! Julia da IRB 😊 Nossos medicos sao referencia na area e o atendimento e super acolhedor. Quer marcar?`,
-          buttons: [
-            { id: 'sim_agendar', text: 'Sim, quero agendar' },
-            { id: 'saber_mais', text: 'Contar mais' },
-            { id: 'nao_obrigado', text: 'Nao, obrigado' },
-          ],
-          footerText: 'IRB Prime Care',
-        },
-      };
-    },
-  },
-  {
-    // Tentativa 3: 24 horas — EMPATIA
+    // Tentativa 2: 24 horas — DESPEDIDA (leve, porta aberta, sem pressao)
     delay: 24 * 60 * 60 * 1000,
     getMessage: (name) => {
       const greeting = name ? `Oi ${name}` : 'Oi';
       return {
-        text: `${greeting}! Julia aqui 😊 Sei como e a correria do dia a dia. Mas cuidar da saude e importante. Quando quiser, to aqui pra ajudar!`,
-        interactive: {
-          type: 'buttons',
-          text: `${greeting}! Julia aqui 😊 Sei como e a correria do dia a dia. Mas cuidar da saude e importante. Quando quiser, to aqui pra ajudar!`,
-          buttons: [
-            { id: 'agendar_agora', text: 'Vamos agendar!' },
-            { id: 'lembrar_amanha', text: 'Me lembra amanha' },
-            { id: 'nao_preciso', text: 'Nao preciso agora' },
-          ],
-          footerText: 'IRB Prime Care',
-        },
-      };
-    },
-  },
-  {
-    // Tentativa 4: 48 horas — DESPEDIDA (sem botoes, mais leve)
-    delay: 48 * 60 * 60 * 1000,
-    getMessage: (name) => {
-      const greeting = name ? `Oi ${name}` : 'Oi';
-      return {
-        text: `${greeting}! Julia aqui pela ultima vez 😊 Sem pressao nenhuma! Quando quiser cuidar da saude, e so me chamar. Cuida de voce! ❤️`,
+        text: `${greeting}! Clara aqui 😊 Sem pressao nenhuma! Quando quiser cuidar da saude, e so me chamar. Cuida de voce! ❤️`,
       };
     },
   },
@@ -197,10 +140,10 @@ const ATTENTION_RECOVERY: Array<{
 // Mensagens de follow-up para outros tipos (com botoes)
 const FOLLOW_UP_MESSAGES: Record<string, (name: string | null) => { text: string; interactive?: InteractiveMessage }> = {
   escape_phrase: (name) => ({
-    text: `Oi${name ? ` ${name}` : ''}! Julia da IRB aqui 😊 Fiquei pensando em voce. Quer retomar de onde paramos?`,
+    text: `Oi${name ? ` ${name}` : ''}! Clara da IRB aqui 😊 Fiquei pensando em voce. Quer retomar de onde paramos?`,
     interactive: {
       type: 'buttons',
-      text: `Oi${name ? ` ${name}` : ''}! Julia da IRB aqui 😊 Fiquei pensando em voce. Quer retomar de onde paramos?`,
+      text: `Oi${name ? ` ${name}` : ''}! Clara da IRB aqui 😊 Fiquei pensando em voce. Quer retomar de onde paramos?`,
       buttons: [
         { id: 'sim_retomar', text: 'Sim, vamos!' },
         { id: 'atendente', text: 'Falar com alguem' },
@@ -210,10 +153,10 @@ const FOLLOW_UP_MESSAGES: Record<string, (name: string | null) => { text: string
     },
   }),
   appointment_reminder: (name) => ({
-    text: `Oi${name ? ` ${name}` : ''}! Julia da IRB 😊 Amanha tem consulta! Chega uns 10 minutinhos antes ta? Te esperamos!`,
+    text: `Oi${name ? ` ${name}` : ''}! Clara da IRB 😊 Amanha tem consulta! Chega uns 10 minutinhos antes ta? Te esperamos!`,
     interactive: {
       type: 'buttons',
-      text: `Oi${name ? ` ${name}` : ''}! Julia da IRB 😊 Amanha tem consulta! Chega uns 10 minutinhos antes ta? Te esperamos!`,
+      text: `Oi${name ? ` ${name}` : ''}! Clara da IRB 😊 Amanha tem consulta! Chega uns 10 minutinhos antes ta? Te esperamos!`,
       buttons: [
         { id: 'confirmar', text: 'Confirmado!' },
         { id: 'remarcar', text: 'Preciso remarcar' },
@@ -223,10 +166,10 @@ const FOLLOW_UP_MESSAGES: Record<string, (name: string | null) => { text: string
     },
   }),
   post_appointment: (name) => ({
-    text: `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Como foi a consulta? Me conta!`,
+    text: `Oi${name ? ` ${name}` : ''}! Clara aqui 😊 Como foi a consulta? Me conta!`,
     interactive: {
       type: 'buttons',
-      text: `Oi${name ? ` ${name}` : ''}! Julia aqui 😊 Como foi a consulta? Me conta!`,
+      text: `Oi${name ? ` ${name}` : ''}! Clara aqui 😊 Como foi a consulta? Me conta!`,
       buttons: [
         { id: 'otima', text: 'Foi otima!' },
         { id: 'duvida_pos', text: 'Tenho uma duvida' },

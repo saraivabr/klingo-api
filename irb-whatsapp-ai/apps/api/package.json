@@ -22,7 +22,8 @@
     "ioredis": "^5.4.0",
     "pdfkit": "^0.15.0",
     "@irb/shared": "workspace:*",
-    "@irb/database": "workspace:*"
+    "@irb/database": "workspace:*",
+    "@anthropic-ai/sdk": "^0.39.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

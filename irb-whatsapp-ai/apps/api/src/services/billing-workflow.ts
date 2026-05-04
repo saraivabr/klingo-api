@@ -12,14 +12,7 @@
 
 import { db, schema } from '@irb/database';
 import { eq, and, lt, sql } from 'drizzle-orm';
-import { getAsaasClient, type AsaasCustomerRequest } from './asaas.js';
-import {
-  notifyBillCreated,
-  notifyBillPixPayment,
-  notifyPaymentReceived,
-  notifyBillReminder,
-} from './whatsapp-notifications.js';
-import type { NotificationRecipient, BillInfo } from './whatsapp-notifications.js';
+import { getAsaasClient } from './asaas.js';
 
 // ============================================================================
 // Types
@@ -60,7 +53,7 @@ export interface ProcessPaymentResult {
 // Helper Functions
 // ============================================================================
 
-async function getPatientInfo(patientId: string): Promise<NotificationRecipient | null> {
+async function getPatientInfo(patientId: string): Promise<{ phone: string; name: string } | null> {
   const [patient] = await db.select({
     phone: schema.patients.phone,
     name: schema.patients.name,
@@ -113,21 +106,8 @@ async function getOrCreateAsaasCustomer(patientId: string): Promise<string | nul
     return existing.asaasId;
   }
 
-  // Buscar dados do paciente
-  const [patient] = await db.select()
-    .from(schema.patients)
-    .where(eq(schema.patients.id, patientId))
-    .limit(1);
-
-  if (!patient) return null;
-
-  // TODO: Descriptografar CPF se necessário
-  // Por enquanto, assumimos que não temos CPF disponível
-  // O Asaas requer CPF para criar customer
-
-  // Se não temos CPF, não podemos criar customer no Asaas
-  // Retornar null e processar pagamento manualmente
-  console.warn('[Billing Workflow] Paciente sem CPF - cobrança Asaas não disponível');
+  // Sem customer Asaas cadastrado — precisa ser criado via PDV ou Subscriptions (com CPF)
+  console.warn(`[Billing Workflow] Paciente ${patientId} sem customer Asaas — crie via PDV ou Assinaturas`);
   return null;
 }
 
@@ -184,18 +164,38 @@ export async function createAsaasCharge(
     }
 
     // 3. Criar payment no Asaas
-    // TODO: Implementar criação de payment avulso no AsaasClient
-    // Por enquanto, usamos o modelo de subscription existente
+    const amountReais = bill.netAmount / 100;
+
+    const asaasPayment = await asaasClient.createCharge({
+      customer: asaasCustomerId,
+      billingType,
+      value: amountReais,
+      dueDate,
+      description: `IRB Prime Care - Fatura ${bill.billNumber}`,
+      externalReference: billId,
+    });
 
     // 4. Se PIX, obter QR Code
     let pixCode: string | undefined;
-    let invoiceUrl: string | undefined;
+    let invoiceUrl = asaasPayment.invoiceUrl;
 
-    // TODO: Implementar após adicionar createPayment no AsaasClient
+    if (billingType === 'PIX') {
+      try {
+        const pix = await asaasClient.getPixQrCode(asaasPayment.id);
+        if (pix.payload) {
+          pixCode = pix.payload;
+        }
+      } catch (err) {
+        console.warn('[Billing Workflow] PIX QR code failed:', (err as Error).message);
+      }
+    }
 
     return {
-      success: false,
-      message: 'Funcionalidade em desenvolvimento - use pagamento manual',
+      success: true,
+      asaasPaymentId: asaasPayment.id,
+      pixCode,
+      invoiceUrl,
+      message: `Cobrança criada: ${asaasPayment.id}`,
     };
   } catch (error) {
     console.error('[Billing Workflow] Erro ao criar cobrança Asaas:', error);
@@ -259,22 +259,6 @@ export async function processPayment(
       .set({ status: newStatus })
       .where(eq(schema.bills.id, billId));
 
-    // 6. Notificar paciente
-    const patientInfo = await getPatientInfo(bill.patientId);
-
-    if (patientInfo) {
-      try {
-        await notifyPaymentReceived(
-          patientInfo,
-          bill.billNumber,
-          amountPaid,
-          paymentMethod,
-        );
-      } catch (err) {
-        console.error('[Billing Workflow] Erro ao enviar notificação:', err);
-      }
-    }
-
     return {
       success: true,
       transactionId: transaction.id,
@@ -320,20 +304,9 @@ export async function sendPaymentReminder(
       return { success: false, message: 'Paciente não encontrado' };
     }
 
-    // Calcular dias de atraso (se tiver vencimento)
-    // Por enquanto, assumimos 0 dias
-    const daysOverdue = 0;
-
-    const billInfo: BillInfo = {
-      billNumber: bill.billNumber,
-      patientName: patientInfo.name,
-      totalAmount: bill.totalAmount,
-      netAmount: bill.netAmount,
-    };
-
-    await notifyBillReminder(patientInfo, billInfo, daysOverdue);
-
-    return { success: true, message: 'Lembrete enviado' };
+    // Lembrete registrado (notificação WhatsApp desativada)
+    console.log(`[Billing Workflow] Lembrete para fatura ${bill.billNumber}, paciente: ${patientInfo.name}`);
+    return { success: true, message: 'Lembrete registrado' };
   } catch (error) {
     console.error('[Billing Workflow] Erro ao enviar lembrete:', error);
     return { success: false, message: 'Erro ao enviar lembrete' };
@@ -362,17 +335,9 @@ export async function sendPixPayment(
       return { success: false, message: 'Paciente não encontrado' };
     }
 
-    const billInfo: BillInfo = {
-      billNumber: bill.billNumber,
-      patientName: patientInfo.name,
-      totalAmount: bill.totalAmount,
-      netAmount: bill.netAmount,
-      pixCode,
-    };
-
-    await notifyBillPixPayment(patientInfo, billInfo);
-
-    return { success: true, message: 'PIX enviado' };
+    // PIX registrado (notificação WhatsApp desativada)
+    console.log(`[Billing Workflow] PIX para fatura ${bill.billNumber}, paciente: ${patientInfo.name}`);
+    return { success: true, message: 'PIX registrado' };
   } catch (error) {
     console.error('[Billing Workflow] Erro ao enviar PIX:', error);
     return { success: false, message: 'Erro ao enviar PIX' };

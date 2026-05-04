@@ -262,7 +262,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
         recent: recentBills,
       },
       pharmacy: {
-        pendingPrescriptions: Number(pharmacyPending[0]?.count || 0),
+        totalPrescriptions: Number(pharmacyPending[0]?.count || 0),
         lowStockCount: lowStockMedicines.length,
         lowStockMedicines,
       },
@@ -413,5 +413,121 @@ export async function dashboardRoutes(app: FastifyInstance) {
     );
 
     return { bills: billsWithTransactions };
+  });
+
+  // ============= INTERNAL INDICATORS (SOL-IGS-0422 T03) =============
+  app.get('/indicators', async () => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      mtdRevenueRow,
+      activeSubs,
+      overdueSubs,
+      cancelledThisMonth,
+      activeAtMonthStart,
+      newBookingsToday,
+      noShowLast30,
+      realizedLast30,
+      revenueByPlan,
+    ] = await Promise.all([
+      db.select({
+        totalCents: sql<number>`COALESCE(SUM(${schema.payments.amountCents}), 0)`,
+        count: count(),
+      })
+        .from(schema.payments)
+        .where(and(
+          eq(schema.payments.status, 'RECEIVED'),
+          gte(schema.payments.paidAt, monthStart),
+        )),
+
+      db.select({ count: count() })
+        .from(schema.subscriptions)
+        .where(eq(schema.subscriptions.status, 'active')),
+
+      db.select({ count: count() })
+        .from(schema.subscriptions)
+        .where(eq(schema.subscriptions.status, 'overdue')),
+
+      db.select({ count: count() })
+        .from(schema.subscriptions)
+        .where(and(
+          eq(schema.subscriptions.status, 'cancelled'),
+          gte(schema.subscriptions.cancelledAt, monthStart),
+        )),
+
+      db.select({ count: count() })
+        .from(schema.subscriptions)
+        .where(and(
+          lte(schema.subscriptions.startedAt, monthStart),
+          sql`(${schema.subscriptions.cancelledAt} IS NULL OR ${schema.subscriptions.cancelledAt} >= ${monthStart})`,
+        )),
+
+      db.select({ count: count() })
+        .from(schema.appointments)
+        .where(gte(schema.appointments.createdAt, todayStart)),
+
+      db.select({ count: count() })
+        .from(schema.appointments)
+        .where(and(
+          eq(schema.appointments.status, 'no_show'),
+          gte(schema.appointments.scheduledAt, thirtyDaysAgo),
+        )),
+
+      db.select({ count: count() })
+        .from(schema.appointments)
+        .where(and(
+          sql`${schema.appointments.status} IN ('completed','no_show')`,
+          gte(schema.appointments.scheduledAt, thirtyDaysAgo),
+        )),
+
+      db.select({
+        planId: schema.subscriptions.planId,
+        planName: schema.plans.name,
+        activeCount: count(),
+        mrrCents: sql<number>`COALESCE(SUM(${schema.subscriptions.planPriceCents}), 0)`,
+      })
+        .from(schema.subscriptions)
+        .leftJoin(schema.plans, eq(schema.subscriptions.planId, schema.plans.id))
+        .where(eq(schema.subscriptions.status, 'active'))
+        .groupBy(schema.subscriptions.planId, schema.plans.name),
+    ]);
+
+    const activeBase = Number(activeAtMonthStart[0]?.count ?? 0);
+    const cancelledCount = Number(cancelledThisMonth[0]?.count ?? 0);
+    const churnRatePct = activeBase > 0 ? +((cancelledCount / activeBase) * 100).toFixed(2) : 0;
+
+    const noShowCount = Number(noShowLast30[0]?.count ?? 0);
+    const realizedCount = Number(realizedLast30[0]?.count ?? 0);
+    const noShowRatePct = realizedCount > 0 ? +((noShowCount / realizedCount) * 100).toFixed(2) : 0;
+
+    return {
+      period: { monthStart, now },
+      revenue: {
+        mtdCents: Number(mtdRevenueRow[0]?.totalCents ?? 0),
+        mtdPaymentsCount: Number(mtdRevenueRow[0]?.count ?? 0),
+      },
+      subscriptions: {
+        active: Number(activeSubs[0]?.count ?? 0),
+        overdue: Number(overdueSubs[0]?.count ?? 0),
+        cancelledThisMonth: cancelledCount,
+        activeAtMonthStart: activeBase,
+        churnRatePct,
+      },
+      appointments: {
+        newToday: Number(newBookingsToday[0]?.count ?? 0),
+        noShowLast30: noShowCount,
+        realizedLast30: realizedCount,
+        noShowRatePct,
+      },
+      revenueByPlan: revenueByPlan.map(r => ({
+        planId: r.planId,
+        planName: r.planName ?? '—',
+        activeCount: Number(r.activeCount),
+        mrrCents: Number(r.mrrCents),
+      })),
+    };
   });
 }

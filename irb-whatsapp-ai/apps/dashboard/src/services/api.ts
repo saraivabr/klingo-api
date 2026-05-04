@@ -60,6 +60,8 @@ export const api = {
 
   getMetrics: () => request<any>('/dashboard/metrics'),
 
+  getIndicators: () => request<any>('/dashboard/indicators'),
+
   getEscalations: () => request<any[]>('/dashboard/escalations'),
 
   resolveEscalation: (id: string, notes?: string) =>

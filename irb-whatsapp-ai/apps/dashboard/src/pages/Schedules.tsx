@@ -86,20 +86,18 @@ export default function Schedules() {
   async function loadData() {
     try {
       setLoading(true);
-      // Fetch doctors from dashboard metrics endpoint
-      const response = await apiRequest('/dashboard/metrics');
-      // For demo, create dummy doctors list or fetch from patients
-      // In a real app, there would be a /api/doctors endpoint
-      const mockDoctors = [{ id: 'doc-1', name: 'Dr. João Silva' }];
-      setDoctors(mockDoctors);
-      if (mockDoctors.length > 0) {
-        setSelectedDoctorId(mockDoctors[0].id);
+      const response = await apiRequest('/doctors');
+      const doctorList: Doctor[] = (response.doctors || []).map((d: any) => ({
+        id: d.id,
+        name: d.name,
+      }));
+      setDoctors(doctorList);
+      if (doctorList.length > 0) {
+        setSelectedDoctorId(doctorList[0].id);
       }
     } catch (error) {
       console.error('Failed to load doctors:', error);
-      // Fallback to mock data for UI testing
-      setDoctors([{ id: 'doc-1', name: 'Dr. João Silva' }]);
-      setSelectedDoctorId('doc-1');
+      setDoctors([]);
     } finally {
       setLoading(false);
     }

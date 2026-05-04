@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório SOL-IGS-0422 — IRB Prime Care</title>
+<style>
+  :root {
+    --brand: #1e40af;
+    --ok: #059669;
+    --warn: #d97706;
+    --muted: #64748b;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --code-bg: #0f172a;
+    --code-text: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; line-height: 1.6;
+  }
+  header { border-bottom: 3px solid var(--brand); padding-bottom: 1.25rem; margin-bottom: 2rem; }
+  header h1 { margin: 0 0 .4rem; font-size: 1.8rem; color: var(--brand); }
+  header .meta { color: var(--muted); font-size: .92rem; }
+  header .meta strong { color: var(--text); }
+  h2 { font-size: 1.3rem; margin-top: 2.25rem; border-left: 4px solid var(--brand); padding-left: .75rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.25rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  table { width: 100%; border-collapse: collapse; margin: .8rem 0; }
+  th, td { text-align: left; padding: .65rem .8rem; border-bottom: 1px solid var(--border); font-size: .95rem; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  .badge { display: inline-block; padding: .18rem .6rem; border-radius: 999px; font-size: .78rem; font-weight: 600; letter-spacing: .02em; }
+  .badge-ok { background: #d1fae5; color: var(--ok); }
+  .badge-warn { background: #fef3c7; color: var(--warn); }
+  pre { background: var(--code-bg); color: var(--code-text); padding: 1rem 1.25rem; border-radius: 8px; overflow-x: auto; font-size: .88rem; line-height: 1.5; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .diff-add { color: #86efac; }
+  .diff-context { color: #94a3b8; }
+  ul { padding-left: 1.25rem; } ul li { margin: .3rem 0; }
+  .ok-list li::marker { content: "✅ "; }
+  .step-list li::marker { content: "▸ "; color: var(--brand); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .8rem; margin: 1rem 0; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: .9rem 1.1rem; }
+  .kpi .label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+  .kpi .value { font-size: 1.4rem; font-weight: 700; margin-top: .2rem; }
+  .endpoint { font-family: "SF Mono", Menlo, Consolas, monospace; background: #f1f5f9; padding: .1rem .4rem; border-radius: 4px; font-size: .88em; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .82rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Relatório de Execução — SOL-IGS-0422</h1>
+  <div class="meta">
+    <strong>Sistema:</strong> IRB Prime Care / IGS &nbsp;•&nbsp;
+    <strong>Data:</strong> 22/04/2026 &nbsp;•&nbsp;
+    <strong>Servidor:</strong> 187.77.62.141 &nbsp;•&nbsp;
+    <strong>Responsável técnico:</strong> Fellipe Saraiva
+  </div>
+</header>
+
+<section>
+  <h2>Resumo Executivo</h2>
+  <div class="grid">
+    <div class="kpi"><div class="label">Tarefas Solicitadas</div><div class="value">3</div></div>
+    <div class="kpi"><div class="label">Entregues em Produção</div><div class="value" style="color:var(--ok)">3</div></div>
+    <div class="kpi"><div class="label">Bloqueadas</div><div class="value" style="color:var(--ok)">0</div></div>
+    <div class="kpi"><div class="label">Sujeitas a Ajustes</div><div class="value" style="color:var(--warn)">2</div></div>
+  </div>
+  <p>As três tarefas solicitadas pela IGS foram implementadas, validadas e estão em produção. T02
+  (OCR) e T03 (Indicadores) foram entregues com <strong>defaults razoáveis</strong> e podem ser
+  ajustadas conforme o cliente refine os requisitos (indicadores específicos, fluxo de confirmação
+  do agendamento, etc.).</p>
+</section>
+
+<section>
+  <h2>Panorama das Tarefas</h2>
+  <table>
+    <thead><tr><th>#</th><th>Título</th><th>Prioridade</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>T01</td>
+        <td>Plano cancelado aparecendo na venda</td>
+        <td>Alta</td>
+        <td><span class="badge badge-ok">Em produção</span></td>
+      </tr>
+      <tr>
+        <td>T02</td>
+        <td>OCR + agendamento automático de exames</td>
+        <td>Alta</td>
+        <td><span class="badge badge-ok">Em produção (defaults)</span></td>
+      </tr>
+      <tr>
+        <td>T03</td>
+        <td>Indicadores internos no sistema IRB</td>
+        <td>Média</td>
+        <td><span class="badge badge-ok">Em produção (defaults)</span></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>TAREFA 01 — Filtro de Planos Cancelados</h2>
+  <div class="card">
+    <h3>Arquivo modificado</h3>
+    <p><code>apps/api/src/routes/finance.ts</code></p>
+    <h3>Diff aplicado</h3>
+<pre><span class="diff-context">   })
+     .from(schema.plans)</span>
+<span class="diff-add">+    .where(eq(schema.plans.isActive, true))</span>
+<span class="diff-context">     .orderBy(schema.plans.priceCents);</span></pre>
+    <p>Ajuste complementar: endpoint <code>PUT /plans/:id</code> agora aceita <code>name</code>,
+    <code>priceSemestralCents</code> e <code>priceAnnualCents</code>.</p>
+  </div>
+</section>
+
+<section>
+  <h2>TAREFA 02 — OCR + Agendamento Automático</h2>
+  <div class="card">
+    <h3>Arquitetura entregue</h3>
+    <p>Pipeline público implementado usando <strong>Claude Vision (Anthropic SDK)</strong> —
+    sem dependência de Google Vision / AWS Textract. A IA lê a foto do pedido e extrai dados
+    estruturados em JSON; o sistema cria uma escalação de atendimento para a equipe confirmar e
+    agendar via fluxo Klingo existente.</p>
+
+    <h3>Fluxo</h3>
+    <ol class="step-list">
+      <li>Paciente acessa <span class="endpoint">https://&lt;host&gt;/enviar-pedido</span></li>
+      <li>Preenche nome + WhatsApp e anexa foto do pedido médico (JPG/PNG/WEBP até 10MB)</li>
+      <li>Frontend converte para base64 e chama <span class="endpoint">POST /api/exam-requests/upload</span></li>
+      <li>API envia à Claude Vision com prompt estruturado — extrai paciente, CPF, médico, CRM, exames, data, indicação clínica, nível de confiança</li>
+      <li>Sistema tenta casar com paciente existente pelo telefone</li>
+      <li>Cria <code>escalation</code> com reason <code>exam_request_auto_ocr</code> e prioridade conforme a confiança</li>
+      <li>Paciente recebe protocolo + lista dos exames identificados. Equipe recebe escalação no painel para confirmar o agendamento</li>
+    </ol>
+
+    <h3>Arquivos criados/modificados</h3>
+    <ul class="ok-list">
+      <li><code>apps/api/src/routes/exam-requests.ts</code> — rota pública (rate limit 10/min)</li>
+      <li><code>apps/api/src/server.ts</code> — registro + bodyLimit 20MB</li>
+      <li><code>apps/api/package.json</code> — dep <code>@anthropic-ai/sdk</code></li>
+      <li><code>apps/booking/src/ExamUpload.tsx</code> — tela pública de upload</li>
+      <li><code>apps/booking/src/main.tsx</code> — dispatch de rota por URL</li>
+      <li><code>infra/nginx/default.conf</code> — servir <code>/enviar-pedido</code> a partir do bundle booking</li>
+    </ul>
+
+    <h3>Defaults adotados (ajustáveis)</h3>
+    <ul>
+      <li><strong>Modelo:</strong> <code>claude-sonnet-4-5</code> (override via <code>CLAUDE_VISION_MODEL</code>)</li>
+      <li><strong>Tamanho máx.:</strong> 10MB por imagem</li>
+      <li><strong>Formatos:</strong> JPG, PNG, GIF, WEBP (PDF requer trabalho adicional)</li>
+      <li><strong>Agendamento:</strong> confirmação manual pela equipe (via escalações) — evita bookings errados por OCR ambíguo. Pode evoluir para agendamento 100% automático quando houver tabela mapping exame→procedimento Klingo</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>TAREFA 03 — Indicadores Internos</h2>
+  <div class="card">
+    <h3>Endpoint</h3>
+    <p><span class="endpoint">GET /api/dashboard/indicators</span> (autenticado)</p>
+
+    <h3>Indicadores entregues</h3>
+    <table>
+      <thead><tr><th>Categoria</th><th>Indicador</th><th>Fonte</th></tr></thead>
+      <tbody>
+        <tr><td>Receita</td><td>Faturamento MTD</td><td>Sum(payments.amountCents) WHERE status=RECEIVED e paidAt≥início do mês</td></tr>
+        <tr><td>Receita</td><td>MRR (receita recorrente)</td><td>Sum(planPriceCents) de subscriptions ativas</td></tr>
+        <tr><td>Assinaturas</td><td>Ativas</td><td>Count WHERE status=active</td></tr>
+        <tr><td>Assinaturas</td><td>Em Atraso</td><td>Count WHERE status=overdue</td></tr>
+        <tr><td>Assinaturas</td><td>Canceladas no mês</td><td>Count WHERE status=cancelled e cancelledAt≥início do mês</td></tr>
+        <tr><td>Assinaturas</td><td>Taxa de Churn (%)</td><td>canceladas / base no início do mês</td></tr>
+        <tr><td>Agendamentos</td><td>Novos agendamentos hoje</td><td>Count appointments WHERE createdAt ≥ hoje 00:00</td></tr>
+        <tr><td>Agendamentos</td><td>Taxa de no-show (30d)</td><td>no_show / (completed + no_show) dos últimos 30d</td></tr>
+        <tr><td>Receita</td><td>Receita por plano</td><td>Group by planId: count ativas + MRR por plano</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Frontend</h3>
+    <ul class="ok-list">
+      <li>Nova página <code>apps/dashboard/src/pages/Indicators.tsx</code></li>
+      <li>Acessível em <span class="endpoint">/indicators</span> com item no menu lateral (ícone BarChart3)</li>
+      <li>Layout em cards + tabela de receita por plano com % do MRR</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>Validação</h2>
+  <ul class="ok-list">
+    <li><code>pnpm --filter @irb/api typecheck</code>: passou</li>
+    <li><code>pnpm --filter @irb/api build</code>: passou</li>
+    <li><code>pnpm --filter @irb/dashboard typecheck</code>: passou</li>
+    <li><code>pnpm --filter @irb/dashboard build</code>: passou</li>
+    <li><code>pnpm --filter @irb/booking build</code>: passou</li>
+    <li>Smoke test <code>GET /api/dashboard/indicators</code>: 401 (auth required — correto)</li>
+    <li>Smoke test <code>POST /api/exam-requests/upload</code>: 400 (valida body — correto)</li>
+    <li>Smoke test <code>GET /enviar-pedido/</code>: 200 (nginx servindo SPA)</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Deploy</h2>
+  <ol class="step-list">
+    <li>rsync de <code>apps/api/src/</code>, <code>apps/dashboard/src/</code>, <code>apps/booking/src/</code>, <code>infra/nginx/default.conf</code>, <code>package.json</code>, <code>pnpm-lock.yaml</code></li>
+    <li><code>docker compose build --no-cache api dashboard</code> (dashboard também builda booking)</li>
+    <li><code>docker compose up -d api dashboard</code></li>
+    <li>Containers <code>irb-api</code> e <code>irb-dashboard</code> em <em>Up</em></li>
+  </ol>
+</section>
+
+<section>
+  <h2>Variáveis de Ambiente Novas</h2>
+  <div class="card">
+    <p>Para que a T02 funcione em produção, configure no <code>.env</code> do servidor:</p>
+<pre>ANTHROPIC_API_KEY=sk-ant-...
+CLAUDE_VISION_MODEL=claude-sonnet-4-5   # opcional</pre>
+    <p>Sem <code>ANTHROPIC_API_KEY</code>, o endpoint retorna 503 de forma controlada.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Próximos Passos Sugeridos</h2>
+  <ol class="step-list">
+    <li>Configurar <code>ANTHROPIC_API_KEY</code> no servidor e reiniciar o container api</li>
+    <li>IGS valida o conjunto de indicadores em <code>/indicators</code> e sugere adições/remoções</li>
+    <li>Call com Robert Willian para refinar fluxo de confirmação dos agendamentos OCR (automático vs manual)</li>
+    <li>Considerar suporte a PDF (conversão para imagem no backend antes do OCR)</li>
+    <li>Commit das alterações ao repositório</li>
+  </ol>
+</section>
+
+<footer>
+  Gerado em 22/04/2026 &nbsp;•&nbsp; IRB Prime Care &nbsp;•&nbsp; Documento técnico interno
+</footer>
+
+</body>
+</html>

@@ -1,7 +1,8 @@
 import { Job, Queue } from 'bullmq';
 import { ConversationModel, db, schema, publishEvent, redis } from '@irb/database';
 import { QUEUE_NAMES } from '@irb/shared/constants';
-import { callClaude, aiTools, loadKnowledgeBase, buildContext, classifyIntent, checkEscalation, detectEscapePhrase, transitionState, searchKnowledge, formatChunksForPrompt } from '@irb/ai';
+import { callClaude, aiTools, loadKnowledgeBase, classifyIntent, SPECIALTY_REGEX, DOCTOR_NAME_REGEX, checkEscalation, detectEscapePhrase, transitionState, searchKnowledge, formatChunksForPrompt, getStatePrompt, getDeterministicResponse } from '@irb/ai';
+import type { PromptState } from '@irb/ai';
 import { eq, ilike, and, gte, lt, ne } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { KlingoExternalWorkerClient, getKlingoWorkerSyncClient } from './klingo-sync.js';
@@ -25,6 +26,7 @@ interface AiPipelineJobData {
   text: string;
   instanceName: string;
   messageId?: string;
+  buttonResponse?: string;
 }
 
 const UAZAPI_URL = process.env.UAZAPI_URL || process.env.EVOLUTION_API_URL || 'https://saraiva.uazapi.com';
@@ -145,195 +147,306 @@ interface InteractiveHolder {
   message: PendingInteractiveMessage | null;
 }
 
-const JOURNEY_WELCOME = {
-  text: 'Oii! Sou a Julia da IRB Prime Care 😊 O que te trouxe ate a gente?',
-  buttons: [
-    { id: 'agendar', text: 'Quero agendar' },
-    { id: 'conhecer', text: 'Quero conhecer' },
-    { id: 'atendente', text: 'Falar com alguem' },
+// ─── Deterministic button sets (code decides, not AI) ───
+
+const BUTTONS = {
+  // ─── NÍVEL 1: Welcome ───
+  welcome_list: {
+    type: 'list' as const,
+    buttonText: 'Ver opções',
+    sections: [{
+      title: 'Como posso te ajudar?',
+      items: [
+        { id: 'menu_consulta', title: 'Consulta' },
+        { id: 'menu_estetica', title: 'Estética' },
+        { id: 'menu_med_trabalho', title: 'Medicina do Trabalho' },
+        { id: 'menu_exames', title: 'Exames' },
+        { id: 'menu_associado', title: 'Associado IRB Prime' },
+        { id: 'menu_atendimento', title: 'Falar com Atendimento' },
+      ],
+    }],
+  },
+
+  // ─── NÍVEL 2A: Consulta → Tipos ───
+  consulta_list: {
+    type: 'list' as const,
+    buttonText: 'Escolher',
+    sections: [{
+      title: 'Qual tipo de consulta?',
+      items: [
+        { id: 'tipo_medica', title: 'Médica', description: 'Clínica geral e especialidades' },
+        { id: 'tipo_odonto', title: 'Odontológica', description: 'Limpeza, clareamento, implante' },
+        { id: 'tipo_nutri', title: 'Nutrição', description: 'Reeducação alimentar, emagrecimento' },
+        { id: 'tipo_fono', title: 'Fonoaudiologia', description: 'Fala, audição, deglutição' },
+        { id: 'tipo_psico', title: 'Psicologia / Terapia', description: 'Ansiedade, terapia, bem-estar' },
+      ],
+    }],
+  },
+
+  // ─── NÍVEL 3A: Consulta Médica → Especialidades ───
+  especialidade_list: {
+    type: 'list' as const,
+    buttonText: 'Ver especialidades',
+    sections: [{
+      title: 'Escolha a especialidade',
+      items: [
+        { id: 'esp_clinica', title: 'Clínica Geral/Check-up', description: 'Avaliação completa de saúde' },
+        { id: 'esp_cardio', title: 'Cardiologia', description: 'Coração, pressão, dor no peito' },
+        { id: 'esp_neuro', title: 'Neurologia', description: 'Dor de cabeça, tontura, formigamento' },
+        { id: 'esp_reumato', title: 'Reumatologia', description: 'Dores nas juntas e costas' },
+        { id: 'esp_uro', title: 'Urologia', description: 'Problemas urinários' },
+        { id: 'esp_vascular', title: 'Cirurgia Vascular', description: 'Varizes, circulação' },
+        { id: 'esp_orto', title: 'Ortopedia', description: 'Ossos, músculos, coluna' },
+        { id: 'esp_gineco', title: 'Ginecologia', description: 'Saúde da mulher' },
+        { id: 'esp_psiq', title: 'Psiquiatria', description: 'Ansiedade, insônia, bem-estar' },
+        { id: 'esp_outra', title: 'Outra especialidade' },
+      ],
+    }],
+  },
+
+  // ─── NÍVEL 2B: Estética → Categorias orientadas ao desejo ───
+  estetica_list: {
+    type: 'list' as const,
+    buttonText: 'Ver procedimentos',
+    sections: [{
+      title: 'O que você gostaria?',
+      items: [
+        { id: 'proc_botox', title: 'Botox', description: 'Toxina botulínica' },
+        { id: 'proc_preenchimento', title: 'Preenchimento Facial', description: 'Lábios, olheiras, mandíbula e mais' },
+        { id: 'proc_harmonizacao', title: 'Harmonização Full Face', description: 'Transformação completa' },
+        { id: 'proc_firmeza', title: 'Firmeza/Rejuvenescimento', description: 'Bioestimulador, Ultraformer' },
+        { id: 'proc_rino', title: 'Rinomodelação', description: 'Nariz sem cirurgia' },
+        { id: 'proc_lipo_papada', title: 'Lipo de Papada' },
+        { id: 'proc_outro', title: 'Outro procedimento' },
+      ],
+    }],
+  },
+
+  // ─── NÍVEL 2D: Exames → Tipos ───
+  exames_buttons: [
+    { id: 'exame_imagem', text: 'Exame de Imagem' },
+    { id: 'exame_lab', text: 'Exame Laboratorial' },
+    { id: 'exame_pedido', text: 'Tenho um pedido' },
+  ],
+
+  // ─── NÍVEL 2E: Associado → Ações ───
+  associado_buttons: [
+    { id: 'assoc_quero', text: 'Quero me associar' },
+    { id: 'assoc_ja_sou', text: 'Já sou associado' },
+    { id: 'assoc_saber', text: 'Saber mais' },
+  ],
+
+  // ─── Utilitários ───
+  info_next: [
+    { id: 'menu_consulta', text: 'Agendar consulta' },
+    { id: 'duvida', text: 'Outra dúvida' },
+    { id: 'menu_atendimento', text: 'Falar com alguém' },
+  ],
+  escalation: [
+    { id: 'falar_recepcao', text: 'Falar com recepção' },
   ],
 };
 
-const JOURNEY_TRIAGE = {
-  text: 'Que bom que voce quer cuidar da saude! 😊 Me conta, o que ta te trazendo aqui hoje?',
-  buttons: [
-    { id: 'sintoma', text: 'Tenho um sintoma' },
-    { id: 'checkup', text: 'Quero check-up' },
-    { id: 'exame', text: 'Tenho pedido de exame' },
-  ],
-};
+// ─── Route conversation to the right state, tools, and buttons ───
 
-const JOURNEY_EXAM_TYPE = {
-  text: 'Qual tipo de exame voce precisa fazer?',
-  buttons: [
-    { id: 'imagem', text: 'Exame de imagem' },
-    { id: 'sangue', text: 'Exame de sangue' },
-    { id: 'outro', text: 'Outro exame' },
-  ],
-};
-
-interface JourneyGuardResult {
-  text: string;
-  interactive?: PendingInteractiveMessage;
-  model: string;
+interface RouteResult {
+  promptState: PromptState;
+  tools: typeof aiTools;
+  buttons: Array<{ id: string; text: string }> | null;
+  list?: {
+    buttonText: string;
+    sections: Array<{
+      title: string;
+      items: Array<{ id: string; title: string; description?: string }>;
+    }>;
+  } | null;
+  shouldEscalate: boolean;
+  skipLLM: boolean;
+  deterministicText?: string;
+  escalateReason?: string;
 }
 
-function buildJourneyGuardResponse(intent: string, text: string): JourneyGuardResult | null {
-  if (intent === 'technical_support' || intent === 'out_of_scope') {
-    return {
-      model: 'journey-guard',
-      text:
-        'Entendi. Isso parece um assunto mais tecnico/operacional do que atendimento clinico da IRB. ' +
-        'Se voce quiser, eu te direciono para recepcao. Se a sua necessidade for consulta, exame ou check-up, eu sigo com voce por aqui.',
-      interactive: {
-        type: 'buttons',
-        text: 'Como voce quer seguir?',
-        buttons: [
-          { id: 'falar_recepcao', text: 'Falar com recepção' },
-          { id: 'agendar_consulta', text: 'Quero agendar' },
-          { id: 'checkup', text: 'Quero check-up' },
-        ],
-        footerText: 'IRB Prime Care',
-      },
-    };
-  }
+// ─── Sub-menu routing (button-driven, deterministic menus) ───
+const MENU_ROUTES: Record<string, () => RouteResult> = {
+  // Nível 1 → Nível 2
+  'menu_consulta': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'menu_estetica': () => ({ promptState: 'triage', tools: [], buttons: null, list: BUTTONS.estetica_list, shouldEscalate: false, skipLLM: false }),
+  'menu_med_trabalho': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'menu_exames': () => ({ promptState: 'exam_request', tools: aiTools.filter(t => ['generate_booking_link', 'check_exam_results'].includes(t.function.name)), buttons: BUTTONS.exames_buttons, shouldEscalate: false, skipLLM: false }),
+  'menu_associado': () => ({ promptState: 'info', tools: aiTools.filter(t => ['get_knowledge', 'escalate_to_human'].includes(t.function.name)), buttons: BUTTONS.associado_buttons, shouldEscalate: false, skipLLM: false }),
+  'menu_atendimento': () => ({ promptState: 'escalation_msg', tools: [], buttons: null, shouldEscalate: true, skipLLM: true, deterministicText: getDeterministicResponse('escalation'), escalateReason: 'patient_request' }),
 
+  // Nível 2A → Nível 3 (Consulta → tipos)
+  'tipo_medica': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  // Tipos diretos → booking (force link)
+  'tipo_odonto': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'tipo_nutri': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'tipo_fono': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'tipo_psico': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+
+  // Media response buttons (quando paciente envia imagem)
+  'media_agendar': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'media_duvida': () => ({ promptState: 'freeform', tools: aiTools, buttons: null, shouldEscalate: false, skipLLM: false }),
+  'media_atendente': () => ({ promptState: 'escalation_msg', tools: [], buttons: null, shouldEscalate: true, skipLLM: true, deterministicText: getDeterministicResponse('escalation'), escalateReason: 'patient_request' }),
+
+  // Triage → Pergunta aberta (Clara escuta e direciona)
+  'sintoma': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+
+  // Symptom sub-routes → all go to triage with open question (no closed buttons)
+  'sintoma_dor': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'sintoma_checkup': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'sintoma_outro': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+
+  // Follow-up buttons (reconectam ao funil)
+  'sim_continuar': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'agendar_agora': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'sim_retomar': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'sim_agendar': () => ({ promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'mais_info': () => ({ promptState: 'info', tools: aiTools.filter(t => ['get_knowledge', 'get_service_price', 'generate_booking_link'].includes(t.function.name)), buttons: BUTTONS.info_next, shouldEscalate: false, skipLLM: false }),
+  'outro_horario': () => ({ promptState: 'booking', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'como_chegar': () => ({ promptState: 'info', tools: aiTools.filter(t => ['send_location', 'get_knowledge'].includes(t.function.name)), buttons: null, shouldEscalate: false, skipLLM: false }),
+  'remarcar': () => ({ promptState: 'freeform', tools: aiTools, buttons: null, shouldEscalate: false, skipLLM: false }),
+
+  // Botões utilitários sem rota → determinísticos
+  'duvida': () => ({ promptState: 'freeform', tools: aiTools, buttons: null, shouldEscalate: false, skipLLM: false }),
+  'falar_recepcao': () => ({ promptState: 'escalation_msg', tools: [], buttons: null, shouldEscalate: true, skipLLM: true, deterministicText: getDeterministicResponse('escalation'), escalateReason: 'patient_request' }),
+};
+
+// IDs that go straight to booking with force tool
+const BOOKING_BUTTON_IDS = new Set([
+  // Especialidades médicas
+  'esp_clinica', 'esp_cardio', 'esp_neuro', 'esp_reumato', 'esp_uro',
+  'esp_vascular', 'esp_orto', 'esp_gineco', 'esp_psiq',
+  // Procedimentos estéticos
+  'proc_botox', 'proc_preenchimento', 'proc_harmonizacao', 'proc_firmeza',
+  'proc_rino', 'proc_lipo_papada',
+  // Exames
+  'exame_imagem', 'exame_lab',
+  // Symptom stage 2 selections → booking
+  'cabeca', 'coracao', 'costas', 'pele', 'urinario', 'digestao', 'ansiedade',
+]);
+
+function routeConversation(
+  conversation: any,
+  intent: string,
+  text: string,
+  allIntents: string[],
+  lastButtonId?: string,
+): RouteResult {
+  const patientMsgCount = conversation.messages.filter((m: any) => m.sender === 'patient').length;
   const normalized = text.toLowerCase();
-  const mentionsSpecialty = /\b(cardiolog|dermatolog|ginecolog|neurolog|ortoped|pediatr|psiquiatr|urolog|oftalmolog|endocrinolog|gastro|reumatolog|pneumolog|geriatr|odonto)/i.test(normalized);
-  const operationalGreeting =
-    intent === 'greeting' &&
-    !mentionsSpecialty &&
-    /(financeiro|recepcao|recepção|suporte|dr\.?|dra\.?|clinica|cl[ií]nica|sistema|agenda)/i.test(normalized);
+  const allTexts = conversation.messages
+    .map((m: any) => (m.text || '').toLowerCase())
+    .join(' ');
+  const KNOWN_DOCTOR_NAMES = /\b(angelo|natalia mucare|karla souza|pedro cardoso|maira melo|natalia barbosa|flavio barbieri|eduardo marim|beatriz|rodrigo favoreto|lucas rodrigues|thalita goulart)\b/i;
+  const mentionsSpecialty = SPECIALTY_REGEX.test(normalized);
+  const mentionsDoctor = DOCTOR_NAME_REGEX.test(normalized) || KNOWN_DOCTOR_NAMES.test(normalized) || KNOWN_DOCTOR_NAMES.test(allTexts);
 
-  if (operationalGreeting) {
+  // ─── 0. Button-driven sub-menu routing (highest priority after escalations) ───
+  if (lastButtonId) {
+    // Direct booking buttons → force generate_booking_link
+    if (BOOKING_BUTTON_IDS.has(lastButtonId)) {
+      return {
+        promptState: 'booking',
+        tools: aiTools.filter(t => t.function.name === 'generate_booking_link'),
+        buttons: null,
+        shouldEscalate: false,
+        skipLLM: false,
+      };
+    }
+    // Sub-menu navigation buttons
+    const menuRoute = MENU_ROUTES[lastButtonId];
+    if (menuRoute) return menuRoute();
+
+    // "Outra especialidade" / "Outro procedimento" / "Outro sintoma" → freeform with booking tools
+    if (lastButtonId === 'esp_outra' || lastButtonId === 'proc_outro' || lastButtonId === 'outro') {
+      return { promptState: 'freeform', tools: aiTools, buttons: null, shouldEscalate: false, skipLLM: false };
+    }
+    // "Tenho um pedido médico" → freeform exam
+    if (lastButtonId === 'exame_pedido') {
+      return { promptState: 'exam_request', tools: aiTools.filter(t => ['escalate_to_human', 'generate_booking_link', 'check_exam_results'].includes(t.function.name)), buttons: null, shouldEscalate: false, skipLLM: false };
+    }
+    // Associado buttons
+    if (lastButtonId === 'assoc_quero') {
+      return { promptState: 'escalation_msg', tools: [], buttons: null, shouldEscalate: true, skipLLM: true, deterministicText: 'Que otimo que voce quer fazer parte da familia IRB Prime! 😊 Vou te conectar com a equipe pra cuidar da sua associacao!', escalateReason: 'patient_request' };
+    }
+    if (lastButtonId === 'assoc_ja_sou' || lastButtonId === 'assoc_saber') {
+      return { promptState: 'info', tools: aiTools.filter(t => ['get_knowledge', 'escalate_to_human'].includes(t.function.name)), buttons: BUTTONS.info_next, shouldEscalate: false, skipLLM: false };
+    }
+  }
+
+  // ─── 1. If conversation state is already booking/scheduling, stay in booking ───
+  const currentState = conversation.state;
+  if (currentState === 'booking' || currentState === 'scheduling') {
     return {
-      model: 'journey-guard',
-      text:
-        'Posso ajudar com atendimento da IRB, agendamento e orientacoes ao paciente. ' +
-        'Se isso for uma demanda interna ou operacional, o ideal é seguir com a equipe da recepcao.',
-      interactive: {
-        type: 'buttons',
-        text: 'Qual é o seu objetivo agora?',
-        buttons: [
-          { id: 'agendar_consulta', text: 'Agendar consulta' },
-          { id: 'informacoes_clinica', text: 'Info da clínica' },
-          { id: 'falar_recepcao', text: 'Falar com recepção' },
-        ],
-        footerText: 'IRB Prime Care',
-      },
+      promptState: 'booking',
+      tools: aiTools.filter(t => ['generate_booking_link', 'check_availability', 'send_interactive_message'].includes(t.function.name)),
+      buttons: null,
+      shouldEscalate: false,
+      skipLLM: false,
     };
   }
 
-  return null;
-}
-
-function applyJourneyExperienceRules(
-  intent: string,
-  patientText: string,
-  aiText: string,
-  toolsUsed: string[],
-  interactiveHolder: InteractiveHolder,
-  conversation: any,
-): string {
-  const normalized = patientText.trim().toLowerCase();
-  const shortMessage = normalized.length <= 20;
-  const patientMessageCount = conversation.messages.filter((message: any) => message.sender === 'patient').length;
-  const recentAiMessages = [...conversation.messages]
-    .reverse()
-    .filter((message: any) => message.sender === 'ai')
-    .slice(0, 2);
-  const recentlyUsedInteractive = recentAiMessages.some(
-    (message: any) => (message.aiMetadata?.interactiveMessagesCount || 0) > 0,
-  );
-
-  if (intent === 'greeting' && shortMessage && patientMessageCount <= 1 && !recentlyUsedInteractive) {
-    interactiveHolder.message = {
-      type: 'buttons',
-      text: JOURNEY_WELCOME.text,
-      buttons: JOURNEY_WELCOME.buttons,
-      footerText: 'IRB Prime Care',
-    };
-    return 'Oii! Sou a Julia, da IRB Prime Care 😊 Como posso te ajudar hoje?';
+  // ─── 2. Critical escalations ───
+  if (intent === 'medical_urgency') {
+    return { promptState: 'escalation_msg', tools: [], buttons: BUTTONS.escalation, shouldEscalate: true, skipLLM: true, deterministicText: 'Entendo a urgencia! Vai num pronto-socorro agora, por favor! Sua saude vem primeiro ❤️', escalateReason: 'medical_urgency' };
+  }
+  if (intent === 'human_request') {
+    return { promptState: 'escalation_msg', tools: [], buttons: null, shouldEscalate: true, skipLLM: true, deterministicText: getDeterministicResponse('escalation'), escalateReason: 'patient_request' };
+  }
+  if (intent === 'complaint') {
+    return { promptState: 'escalation_msg', tools: [], buttons: null, shouldEscalate: true, skipLLM: true, deterministicText: getDeterministicResponse('escalation'), escalateReason: 'complaint' };
   }
 
-  // Only show triage buttons if patient hasn't specified a specialty yet
-  // and AI hasn't already used booking tools
-  const specialtyMentioned = /\b(cardiolog|dermatolog|ginecolog|neurolog|ortoped|pediatr|psiquiatr|urolog|oftalmolog|endocrinolog|gastro|reumatolog|pneumolog|geriatr|odonto)/i.test(normalized);
-  if (intent === 'appointment_booking'
-    && !toolsUsed.includes('send_interactive_message')
-    && !toolsUsed.includes('generate_booking_link')
-    && !toolsUsed.includes('check_availability')
-    && !toolsUsed.includes('book_appointment')
-    && !specialtyMentioned
-  ) {
-    interactiveHolder.message = {
-      type: 'buttons',
-      text: JOURNEY_TRIAGE.text,
-      buttons: JOURNEY_TRIAGE.buttons,
-      footerText: 'IRB Prime Care',
-    };
-    return 'Perfeito. Antes de te mostrar horarios, quero te direcionar certinho 😊';
-  }
-
-  if (/\b(pedido de exame|exame|resultado)\b/i.test(normalized) && !interactiveHolder.message && !recentlyUsedInteractive) {
-    interactiveHolder.message = {
-      type: 'buttons',
-      text: JOURNEY_EXAM_TYPE.text,
-      buttons: JOURNEY_EXAM_TYPE.buttons,
-      footerText: 'IRB Prime Care',
-    };
-    return aiText || 'Certo. Me diz qual tipo de exame voce precisa para eu te orientar melhor.';
-  }
-
+  // ─── 3. Deterministic responses ───
   if (intent === 'gratitude') {
-    interactiveHolder.message = null;
-    return 'Eu que agradeco 😊 Se precisar de algo, é so me chamar por aqui.';
+    return { promptState: 'freeform', tools: [], buttons: null, shouldEscalate: false, skipLLM: true, deterministicText: getDeterministicResponse('gratitude', conversation.patientName) };
+  }
+  if (intent === 'farewell') {
+    return { promptState: 'freeform', tools: [], buttons: null, shouldEscalate: false, skipLLM: true, deterministicText: getDeterministicResponse('farewell', conversation.patientName) };
+  }
+  if (intent === 'out_of_scope') {
+    return { promptState: 'escalation_msg', tools: [], buttons: BUTTONS.escalation, shouldEscalate: true, skipLLM: true, deterministicText: getDeterministicResponse('technical', conversation.patientName), escalateReason: 'technical_support' };
+  }
+  if (intent === 'technical_support') {
+    return { promptState: 'info', tools: aiTools.filter(t => ['get_knowledge', 'escalate_to_human'].includes(t.function.name)), buttons: BUTTONS.info_next, shouldEscalate: false, skipLLM: false };
   }
 
-  if (intent === 'unknown' && !interactiveHolder.message) {
-    return shortMessage
-      ? 'Entendi 😊 Me conta com um pouquinho mais de detalhe o que voce precisa, que eu te direciono melhor.'
-      : aiText;
+  // ─── 4. First message — welcome ───
+  if (patientMsgCount <= 1 && (intent === 'greeting' || intent === 'unknown')) {
+    return { promptState: 'welcome', tools: [], buttons: null, list: BUTTONS.welcome_list, shouldEscalate: false, skipLLM: false };
   }
 
-  return aiText;
-}
+  // ─── 5. Specialty/doctor mentioned → booking ───
+  if (mentionsSpecialty || mentionsDoctor) {
+    return {
+      promptState: 'booking',
+      tools: aiTools.filter(t => ['generate_booking_link', 'check_availability', 'send_interactive_message'].includes(t.function.name)),
+      buttons: null,
+      shouldEscalate: false,
+      skipLLM: false,
+    };
+  }
 
-function shouldKeepInteractiveMessage(
-  intent: string,
-  patientText: string,
-  aiText: string,
-  toolsUsed: string[],
-  interactiveMessage: PendingInteractiveMessage | null,
-  conversation: any,
-): boolean {
-  if (!interactiveMessage) return false;
+  // ─── 6. Info requests ───
+  if (['price_inquiry', 'location_inquiry', 'payment_inquiry', 'insurance_inquiry'].includes(intent)
+    || allIntents.includes('price_inquiry') || allIntents.includes('location_inquiry')) {
+    return {
+      promptState: 'info',
+      tools: aiTools.filter(t => ['get_service_price', 'send_location', 'get_knowledge', 'generate_booking_link'].includes(t.function.name)),
+      buttons: BUTTONS.info_next,
+      shouldEscalate: false,
+      skipLLM: false,
+    };
+  }
 
-  if (toolsUsed.includes('generate_booking_link')) return true;
-  if (toolsUsed.includes('book_appointment')) return true;
-  if (toolsUsed.includes('check_availability')) return true;
-  if (intent === 'appointment_booking') return true;
-  if (intent === 'human_request') return true;
-  if (intent === 'technical_support' || intent === 'out_of_scope') return true;
+  // ─── 7. Appointment booking without specialty → open triage (Clara asks open question) ───
+  if (intent === 'appointment_booking' || allIntents.includes('appointment_booking')) {
+    return { promptState: 'triage', tools: aiTools.filter(t => t.function.name === 'generate_booking_link'), buttons: null, shouldEscalate: false, skipLLM: false };
+  }
 
-  const normalized = patientText.trim().toLowerCase();
-  const isGreeting = /^(oi|ol[áa]|bom dia|boa tarde|boa noite|hey|hello)\b/.test(normalized);
-  const patientMessageCount = conversation.messages.filter((message: any) => message.sender === 'patient').length;
-  if (isGreeting && patientMessageCount <= 1) return true;
-
-  const recentAiMessages = [...conversation.messages]
-    .reverse()
-    .filter((message: any) => message.sender === 'ai')
-    .slice(0, 2);
-  const recentlyUsedInteractive = recentAiMessages.some(
-    (message: any) => (message.aiMetadata?.interactiveMessagesCount || 0) > 0,
-  );
-  if (recentlyUsedInteractive) return false;
-
-  if (/\b(pedido de exame|exame|resultado)\b/i.test(normalized)) return true;
-  if (toolsUsed.includes('get_service_price') || toolsUsed.includes('get_patient_appointments')) return true;
-
-  return false;
+  // ─── 8. Default — freeform ───
+  return { promptState: 'freeform', tools: aiTools, buttons: null, shouldEscalate: false, skipLLM: false };
 }
 
 function updateResponseMetrics(conversation: any, responseTimestamp: Date): void {
@@ -351,68 +464,6 @@ function updateResponseMetrics(conversation: any, responseTimestamp: Date): void
   const previousAvg = conversation.metrics.avgResponseTimeMs || 0;
   conversation.metrics.avgResponseTimeMs =
     Math.round(((previousAvg * previousCount) + responseTimeMs) / (previousCount + 1));
-}
-
-function applyOperationalFallbacks(
-  intent: string,
-  aiText: string,
-  toolsUsed: string[],
-  interactiveHolder: InteractiveHolder,
-): string {
-  const lower = aiText.toLowerCase();
-
-  const priceUnavailable =
-    (intent === 'price_inquiry' || toolsUsed.includes('get_service_price')) &&
-    /(nao consegui|não consegui|nao encontrei|não encontrei).*(pre[cç]o|valor|custo)/i.test(lower);
-
-  if (priceUnavailable) {
-    const fallbackText =
-      'Para te passar o valor exato sem risco de erro, vou te conectar com a recepção agora. ' +
-      'Se preferir, também posso já adiantar seu agendamento.';
-
-    if (!interactiveHolder.message) {
-      interactiveHolder.message = {
-        type: 'buttons',
-        text: fallbackText,
-        buttons: [
-          { id: 'falar_recepcao', text: 'Falar com recepção' },
-          { id: 'agendar_consulta', text: 'Quero agendar' },
-          { id: 'depois', text: 'Depois eu volto' },
-        ],
-        footerText: 'IRB Prime Care',
-      };
-    }
-
-    console.warn('[AI-PIPELINE] Applied operational fallback: price_unavailable');
-    return fallbackText;
-  }
-
-  const appointmentsUnavailable =
-    toolsUsed.includes('get_patient_appointments') &&
-    /(nao encontrei|não encontrei|nenhum agendamento)/i.test(lower);
-
-  if (appointmentsUnavailable) {
-    const fallbackText =
-      'Não achei um agendamento ativo neste momento. Se você quiser, eu já te envio um novo link para remarcar agora.';
-
-    if (!interactiveHolder.message) {
-      interactiveHolder.message = {
-        type: 'buttons',
-        text: fallbackText,
-        buttons: [
-          { id: 'remarcar_agora', text: 'Remarcar agora' },
-          { id: 'falar_recepcao', text: 'Falar com recepção' },
-          { id: 'depois', text: 'Depois eu volto' },
-        ],
-        footerText: 'IRB Prime Care',
-      };
-    }
-
-    console.warn('[AI-PIPELINE] Applied operational fallback: appointments_unavailable');
-    return fallbackText;
-  }
-
-  return aiText;
 }
 
 const BOOKING_BASE_URL = process.env.BOOKING_BASE_URL || 'https://irb.saraiva.ai/agendar';
@@ -1304,22 +1355,29 @@ async function saveConversationWithRetry(conversation: any, maxRetries = 3) {
 export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   const { conversationId, patientPhone, patientId, patientName, instanceName, messageId } = job.data;
   let { text } = job.data;
+  let { buttonResponse } = job.data;
   const startTime = Date.now();
 
   // Job-scoped holder for interactive messages (no module-level state = no race conditions)
   const interactiveHolder: InteractiveHolder = { message: null };
 
-  // Resolve debounced messages: aggregate all buffered texts into one
+  // 1. Resolve debounced messages: aggregate all buffered texts into one
   if (text === '__DEBOUNCED__') {
     const debounceKey = `debounce:${patientPhone}`;
     const bufferedTexts = await redis.lrange(debounceKey, 0, -1);
     await redis.del(debounceKey);
     await redis.del(`debounce_job:${patientPhone}`);
+    // Recover buttonResponse from Redis if lost during debounce
+    if (!buttonResponse) {
+      const savedBtn = await redis.get(`debounce_btn:${patientPhone}`);
+      if (savedBtn) buttonResponse = savedBtn;
+    }
+    await redis.del(`debounce_btn:${patientPhone}`);
     text = bufferedTexts.join('\n');
     if (!text.trim()) return { status: 'skipped', reason: 'empty_debounce' };
   }
 
-  // 0. Send reaction emoji only for greetings/thanks (keep it minimal)
+  // 2. Send reaction emoji only for greetings/thanks (keep it minimal)
   if (messageId) {
     const emoji = pickReactionEmoji(text);
     if (emoji) {
@@ -1327,42 +1385,49 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     }
   }
 
-  // 1. Load conversation
+  // 3. Load conversation
   const conversation = await ConversationModel.findById(conversationId);
   if (!conversation || !conversation.isAiHandling) return { status: 'skipped' };
 
-  // 1.5 🔥 CANCELAR recuperador de atenção pendente — paciente respondeu!
+  // 4. Cancel ALL pending attention recovery jobs — patient responded
   try {
-    const recoveryJobId = `attention_recovery_${conversationId}`;
-    const pendingJob = await followUpQueue.getJob(recoveryJobId);
-    if (pendingJob) {
-      await pendingJob.remove();
-      console.log(`[AI-PIPELINE] 🔥 Cancelled attention recovery for ${patientPhone} — patient responded`);
+    for (const suffix of ['', '_1', '_2']) {
+      const recoveryJobId = `attention_recovery_${conversationId}${suffix}`;
+      const pendingJob = await followUpQueue.getJob(recoveryJobId);
+      if (pendingJob) {
+        await pendingJob.remove();
+        console.log(`[AI-PIPELINE] Cancelled recovery job ${recoveryJobId} for ${patientPhone}`);
+      }
     }
   } catch (err) {
     // Ignora erro se job não existir
   }
 
-  // 2. Classify intent from patient message
+  // 5. Classify intent from patient message
   const { primary: intent, all: allIntents } = classifyIntent(text);
 
-  // 3. Detect escape phrases
+  // 6. Detect escape phrases
   const escapeResult = detectEscapePhrase(text);
+
+  // 7. Route conversation
+  const route = routeConversation(conversation, intent, text, allIntents, buttonResponse);
 
   let toolsUsed: string[] = [];
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let aiText = '';
-  let responseModel = 'journey-guard';
-  let stopReason: string | null = 'guard';
+  let responseModel = 'deterministic';
+  let stopReason: string | null = 'route';
 
-  const journeyGuard = buildJourneyGuardResponse(intent, text);
-  if (journeyGuard) {
-    aiText = journeyGuard.text;
-    responseModel = journeyGuard.model;
-    interactiveHolder.message = journeyGuard.interactive || null;
+  // 8. Deterministic path (no LLM call)
+  if (route.skipLLM) {
+    aiText = route.deterministicText || '';
+    responseModel = 'deterministic';
+    toolsUsed = [];
   } else {
-    // 4. RAG: Search relevant knowledge chunks based on patient message
+    // 9. LLM path
+
+    // RAG search
     let ragContext = '';
     try {
       const ragChunks = await searchKnowledge(text, 5);
@@ -1371,7 +1436,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
       console.error('RAG search failed, continuing without:', err);
     }
 
-    // 5. Build context for Claude (with RAG chunks injected + active doctors)
+    // Build system prompt using state-specific prompt
     const knowledgeBase = await loadKnowledgeBase();
     const activeDoctors = await db.select({
       name: schema.doctors.name,
@@ -1379,20 +1444,51 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
       crm: schema.doctors.crm,
     }).from(schema.doctors).where(eq(schema.doctors.isActive, true));
 
-    const context = buildContext({
-      conversation: conversation as any,
-      knowledgeBase,
-      patientInfo: patientName ? { name: patientName } : null,
+    const previousContext = conversation.summary?.startsWith('[CONTEXTO ANTERIOR') ? conversation.summary : undefined;
+
+    const systemPrompt = getStatePrompt(route.promptState, {
       ragContext,
-      doctors: activeDoctors,
+      activeDoctors,
+      knowledgeBase,
+      previousContext,
     });
 
-    // 6. Call Claude
-    console.log('[AI-PIPELINE] Calling Claude with', aiTools.length, 'tools available');
+    // Build messages from conversation (last 20, merge consecutive same-role, ensure first is user)
+    const MAX_MESSAGES = 20;
+    const recentMessages = conversation.messages.slice(-MAX_MESSAGES);
+
+    const rawMessages: any[] = recentMessages.map((msg: any) => ({
+      role: msg.sender === 'patient' ? 'user' as const : 'assistant' as const,
+      content: msg.text,
+    }));
+
+    // Merge consecutive same-role messages
+    let messages: any[] = [];
+    for (const msg of rawMessages) {
+      if (messages.length > 0 && messages[messages.length - 1].role === msg.role) {
+        const last = messages[messages.length - 1];
+        last.content = `${last.content}\n${msg.content}`;
+      } else {
+        messages.push({ ...msg });
+      }
+    }
+
+    // Ensure first message is from user
+    if (messages.length > 0 && messages[0].role !== 'user') {
+      messages.shift();
+    }
+
+    // Call LLM with route-specific tools (not all 12)
+    // Force tool use in booking state to ensure link generation
+    const forceToolName = (route.promptState === 'booking' && route.tools.some(t => t.function.name === 'generate_booking_link'))
+      ? 'generate_booking_link' : undefined;
+    console.log('[AI-PIPELINE] Calling Claude with', route.tools.length, 'tools, state:', route.promptState, forceToolName ? `(forcing ${forceToolName})` : '');
     let response = await callClaude({
-      systemPrompt: context.systemPrompt,
-      messages: context.messages,
-      tools: aiTools,
+      systemPrompt,
+      messages,
+      tools: route.tools,
+      forceToolUse: !!forceToolName,
+      forceToolName,
     });
     console.log('[AI-PIPELINE] Claude response:', {
       text: response.text?.substring(0, 100),
@@ -1405,9 +1501,8 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     responseModel = response.model;
     stopReason = response.stopReason;
 
-    // 7. Handle tool calls (loop until no more tool calls)
+    // Tool loop (same as before)
     while (response.toolCalls.length > 0) {
-      // Build assistant message with tool calls for OpenAI format
       const assistantMsg: any = {
         role: 'assistant' as const,
         content: response.text || null,
@@ -1430,17 +1525,17 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
         });
       }
 
-      // Re-call with tool results
-      const updatedMessages = [
-        ...context.messages,
+      // Accumulate into messages so multi-turn tool calls see prior results
+      messages = [
+        ...messages,
         assistantMsg,
         ...toolResultMsgs,
       ];
 
       response = await callClaude({
-        systemPrompt: context.systemPrompt,
-        messages: updatedMessages,
-        tools: aiTools,
+        systemPrompt,
+        messages,
+        tools: route.tools,
       });
 
       totalPromptTokens += response.promptTokens;
@@ -1460,103 +1555,58 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
   }
 
   const latencyMs = Date.now() - startTime;
-  // Enforce operational-safe fallback for known failure patterns
-  aiText = applyOperationalFallbacks(intent, aiText, toolsUsed, interactiveHolder);
-  aiText = applyJourneyExperienceRules(intent, text, aiText, toolsUsed, interactiveHolder, conversation);
 
-  // Auto-detect bullet points / numbered lists and convert to interactive buttons
-  // This catches cases where the AI writes options as text instead of calling the tool
-  // BUT: Don't do this if send_interactive_message was already called!
-  const alreadySentInteractive = toolsUsed.includes('send_interactive_message');
-  const bulletConversionAllowed =
-    intent === 'appointment_booking' ||
-    toolsUsed.includes('check_availability') ||
-    toolsUsed.includes('book_appointment') ||
-    /(escolha|qual dessas|qual opcao|qual opção|prefere|confirmar|periodo|período)/i.test(aiText);
+  // 10. Escalation handling
+  let shouldEscalate = route.shouldEscalate;
+  let escalateReason = route.escalateReason;
+  let escalatePriority = 2; // default priority
 
-  if (!interactiveHolder.message && !alreadySentInteractive && bulletConversionAllowed) {
-    const bulletRegex = /^[\s]*(?:[•\-\*]|\d+[\.\)])\s*(.+)$/gm;
-    const bullets: string[] = [];
-    let match;
-    while ((match = bulletRegex.exec(aiText)) !== null) {
-      const item = match[1].trim();
-      if (item.length > 0 && item.length <= 40) bullets.push(item);
+  // Also check: if AI called escalate_to_human tool, actually escalate
+  if (toolsUsed.includes('escalate_to_human') && !shouldEscalate) {
+    shouldEscalate = true;
+    escalateReason = 'ai_tool_escalation';
+    escalatePriority = 3;
+  }
+
+  // Also run the standard escalation check for non-deterministic paths
+  if (!shouldEscalate && !route.skipLLM) {
+    const aiConfidence = stopReason === 'stop' && toolsUsed.length > 0 ? 0.85
+      : stopReason === 'stop' ? 0.7
+      : 0.5;
+
+    let consecutiveUnknowns = 0;
+    const recentAiMsgs = [...conversation.messages].reverse().filter(m => m.sender === 'ai');
+    for (const msg of recentAiMsgs) {
+      if (msg.aiMetadata?.intentClassified === 'unknown' || msg.aiMetadata?.intentClassified === 'other') {
+        consecutiveUnknowns++;
+      } else {
+        break;
+      }
     }
 
-    if (bullets.length >= 2 && bullets.length <= 3) {
-      // Extract the text BEFORE the bullet points as the interactive text
-      const firstBulletIndex = aiText.search(/^[\s]*(?:[•\-\*]|\d+[\.\)])\s*/m);
-      const textBefore = firstBulletIndex > 0 ? aiText.substring(0, firstBulletIndex).trim() : '';
-      const interactiveText = textBefore || 'Escolha uma das opções:';
+    const escalationCheck = checkEscalation({
+      patientMessage: text,
+      aiConfidence,
+      intent,
+      consecutiveUnknowns,
+      sentimentScore: conversation.sentimentScore,
+      currentState: route.promptState,
+    });
 
-      interactiveHolder.message = {
-        type: 'buttons',
-        text: interactiveText,
-        buttons: bullets.map((b, i) => ({
-          id: b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').substring(0, 20),
-          text: b.length > 20 ? b.substring(0, 19) + '…' : b,
-        })),
-        footerText: 'IRB Prime Care',
-      };
-
-      // Remove bullet points from AI text since they'll be buttons now
-      aiText = textBefore;
-      console.log('[AI-PIPELINE] Auto-converted bullet points to buttons:', interactiveHolder.message.buttons);
-    } else if (bullets.length > 3 && bullets.length <= 10) {
-      // Too many for buttons — truncate to first 3 and use buttons (lists don't work well on WhatsApp)
-      const truncated = bullets.slice(0, 3);
-      const firstBulletIndex = aiText.search(/^[\s]*(?:[•\-\*]|\d+[\.\)])\s*/m);
-      const textBefore = firstBulletIndex > 0 ? aiText.substring(0, firstBulletIndex).trim() : '';
-      const interactiveText = textBefore || 'Escolha uma das opções:';
-
-      interactiveHolder.message = {
-        type: 'buttons',
-        text: interactiveText,
-        buttons: truncated.map((b, i) => ({
-          id: b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').substring(0, 20),
-          text: b.length > 20 ? b.substring(0, 19) + '…' : b,
-        })),
-        footerText: 'IRB Prime Care',
-      };
-
-      aiText = textBefore;
-      console.warn(`[AI-PIPELINE] Auto-converted ${bullets.length} bullet points to buttons (truncated to first 3, discarded: ${bullets.slice(3).join(', ')})`);
+    if (escalationCheck.shouldEscalate && escalationCheck.reason) {
+      shouldEscalate = true;
+      escalateReason = escalationCheck.reason;
+      escalatePriority = escalationCheck.priority;
     }
   }
 
-  // 8. Check escalation
-  // Derive AI confidence from stop reason and tool usage
-  const aiConfidence = stopReason === 'guard' ? 0.95
-    : stopReason === 'stop' && toolsUsed.length > 0 ? 0.85
-    : stopReason === 'stop' ? 0.7
-    : 0.5;
-
-  // Track consecutive unknowns from conversation history
-  let consecutiveUnknowns = 0;
-  const recentAiMsgs = [...conversation.messages].reverse().filter(m => m.sender === 'ai');
-  for (const msg of recentAiMsgs) {
-    if (msg.aiMetadata?.intentClassified === 'unknown' || msg.aiMetadata?.intentClassified === 'other') {
-      consecutiveUnknowns++;
-    } else {
-      break;
-    }
-  }
-
-  const escalationCheck = checkEscalation({
-    patientMessage: text,
-    aiConfidence,
-    intent,
-    consecutiveUnknowns,
-    sentimentScore: conversation.sentimentScore,
-  });
-
-  if (escalationCheck.shouldEscalate && escalationCheck.reason) {
+  if (shouldEscalate && escalateReason) {
     // Create escalation in PostgreSQL
     await db.insert(schema.escalations).values({
       conversationMongoId: conversationId,
       patientId,
-      reason: escalationCheck.reason,
-      priority: escalationCheck.priority,
+      reason: escalateReason,
+      priority: escalatePriority,
     });
 
     conversation.status = 'escalated';
@@ -1568,16 +1618,16 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
         conversationId,
         patientPhone,
         patientName,
-        reason: escalationCheck.reason,
-        priority: escalationCheck.priority,
+        reason: escalateReason,
+        priority: escalatePriority,
       },
       timestamp: new Date(),
     });
   }
 
-  // 9. State transition
+  // 11. State transition
   const transition = transitionState(conversation.state as any, intent, {
-    isEscalated: escalationCheck.shouldEscalate,
+    isEscalated: shouldEscalate,
     escapePhraseDetected: escapeResult.detected,
   });
 
@@ -1586,7 +1636,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     conversation.state = transition.newState;
   }
 
-  // 10. Add AI message to conversation
+  // 12. Add AI message to conversation
   conversation.messages.push({
     sender: 'ai',
     text: aiText,
@@ -1600,7 +1650,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
       intentClassified: intent,
       stateTransition: transition.changed ? { from: conversation.previousStates.at(-1)?.state || '', to: transition.newState } : null,
       toolsUsed,
-      interactiveMessagesCount: toolsUsed.filter(t => t === 'send_interactive_message').length,
+      interactiveMessagesCount: (route.buttons || route.list) ? 1 : toolsUsed.filter(t => t === 'send_interactive_message').length,
       latencyMs,
     },
     timestamp: new Date(),
@@ -1620,8 +1670,18 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
 
   await saveConversationWithRetry(conversation);
 
-  // 11. Schedule follow-up if escape phrase detected
+  // Schedule follow-up if escape phrase detected — send warm closing first
   if (escapeResult.detected) {
+    // Send a warm closing message before queuing the follow-up
+    const closingText = 'Sem pressa nenhuma! 😊 Quando decidir, é só me chamar aqui que te ajudo rapidinho. Fico na torcida!';
+    await messageSendQueue.add('send', {
+      conversationId,
+      patientPhone,
+      text: closingText,
+      instanceName,
+    }, { removeOnComplete: 100 });
+    console.log(`[AI-PIPELINE] Sent warm closing message before follow-up for ${patientPhone}`);
+
     await followUpQueue.add('follow-up', {
       conversationId,
       patientPhone,
@@ -1633,7 +1693,7 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     });
   }
 
-  // 12. Enqueue message to send (with interactive message if tool was used)
+  // 13. Build sendJobData
   const sendJobData: {
     conversationId: string;
     patientPhone: string;
@@ -1657,125 +1717,54 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     instanceName,
   };
 
-  // If an interactive message was configured via tool, include it
-  if (interactiveHolder.message) {
-    if (shouldKeepInteractiveMessage(intent, text, aiText, toolsUsed, interactiveHolder.message, conversation)) {
-      console.log('[AI-PIPELINE] Adding interactive message to send job:', interactiveHolder.message);
-      sendJobData.interactive = interactiveHolder.message;
-    } else {
-      console.log('[AI-PIPELINE] Dropping interactive message to reduce UI noise');
-      interactiveHolder.message = null;
-    }
-  } else {
-    console.log('[AI-PIPELINE] No interactive message pending');
-    
-    // Detect if AI promised buttons but didn't call the tool
-    const promisedButtons = /vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista)/i.test(aiText);
-    
-    // Also detect first contact / greeting scenarios that should always have buttons
-    const isFirstContact = conversation.messages.filter(m => m.sender === 'patient').length <= 1;
-    const isGreeting = /^(oi|olá|ola|bom dia|boa tarde|boa noite|e ai|eai|hey|hello|hi)\b/i.test(text);
-    const shouldHaveButtons = promisedButtons || (isFirstContact && isGreeting && intent === 'greeting');
-    
-    if (shouldHaveButtons) {
-      console.warn('[AI-PIPELINE] ⚠️ AI SHOULD HAVE SENT BUTTONS BUT DIDNT - Adding fallback buttons...');
-      console.warn('[AI-PIPELINE] isFirstContact:', isFirstContact, 'isGreeting:', isGreeting, 'promisedButtons:', promisedButtons);
-      
-      // Add fallback buttons based on context
-      // Since the AI didn't call the tool, we'll add sensible defaults
-      if (isFirstContact && isGreeting) {
-        // First contact: triage buttons
-        interactiveHolder.message = {
-          type: 'buttons',
-          text: aiText.replace(/vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim() || aiText,
-          buttons: [
-            { id: 'sintoma', text: 'Tenho um sintoma' },
-            { id: 'checkup', text: 'Quero check-up' },
-            { id: 'conhecer', text: 'Conhecer a clínica' },
-          ],
-          footerText: 'IRB Prime Care',
-        };
-        sendJobData.interactive = interactiveHolder.message;
-        // Clean up the text - remove the promise since we're delivering buttons
-        aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*$/i, '').trim();
-        sendJobData.text = aiText;
-        console.log('[AI-PIPELINE] ✅ Added fallback triage buttons');
-      } else if (promisedButtons && (intent === 'appointment_booking' || conversation.state === 'scheduling' || conversation.state === 'collecting_info')) {
-        // Generic fallback only for active scheduling contexts
-        const cleanText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*[:.]?$/im, '').trim();
-
-        // Determine context-aware fallback buttons
-        let fallbackButtons: Array<{ id: string; text: string }>;
-        const state = conversation.state;
-
-        if (state === 'scheduling' || state === 'collecting_info' || /agendar|horário|consulta/i.test(aiText)) {
-          fallbackButtons = [
-            { id: 'manha', text: 'Manhã (7h-12h)' },
-            { id: 'tarde', text: 'Tarde (13h-18h)' },
-            { id: 'qualquer', text: 'Qualquer horário' },
-          ];
-        } else if (state === 'price_discussion' || /preço|valor|custo|quanto/i.test(aiText)) {
-          fallbackButtons = [
-            { id: 'agendar', text: 'Quero agendar' },
-            { id: 'outro_servico', text: 'Outro serviço' },
-            { id: 'atendente', text: 'Falar com alguém' },
-          ];
-        } else if (state === 'service_inquiry' || state === 'exploring') {
-          fallbackButtons = [
-            { id: 'agendar', text: 'Quero agendar' },
-            { id: 'preco', text: 'Saber preços' },
-            { id: 'duvida', text: 'Outra dúvida' },
-          ];
-        } else {
-          fallbackButtons = [
-            { id: 'agendar', text: 'Quero agendar' },
-            { id: 'duvida', text: 'Tirar dúvida' },
-            { id: 'atendente', text: 'Falar com alguém' },
-          ];
-        }
-
-        interactiveHolder.message = {
-          type: 'buttons',
-          text: cleanText || aiText,
-          buttons: fallbackButtons,
-          footerText: 'IRB Prime Care',
-        };
-        sendJobData.interactive = interactiveHolder.message;
-        aiText = cleanText || aiText;
-        sendJobData.text = aiText;
-        console.log('[AI-PIPELINE] ✅ Added contextual fallback buttons for state:', state);
-      } else if (promisedButtons) {
-        aiText = aiText.replace(/\n*vou (deixar|mandar|enviar|te mandar|mostrar).*(opç[õo]es?|bot[õa]o|botões|menu|lista).*[:.]?$/im, '').trim();
-        sendJobData.text = aiText;
-        console.log('[AI-PIPELINE] Removed broken button promise without sending interactive');
-      }
-    }
+  // Inject route buttons or list (code-decided, not AI-decided)
+  if (route.list) {
+    sendJobData.interactive = {
+      type: 'list',
+      text: aiText || 'Como posso te ajudar? 😊',
+      listButtonText: route.list.buttonText,
+      listSections: route.list.sections,
+      footerText: 'IRB Prime Care',
+    };
+    console.log('[AI-PIPELINE] Injecting route list:', route.list.sections.flatMap(s => s.items.map(i => i.title)).join(', '));
+  } else if (route.buttons) {
+    sendJobData.interactive = {
+      type: 'buttons',
+      text: aiText,
+      buttons: route.buttons,
+      footerText: 'IRB Prime Care',
+    };
+    console.log('[AI-PIPELINE] Injecting route buttons:', route.buttons.map(b => b.text).join(', '));
   }
 
-  // When generate_booking_link was used, extract URL from AI text and send as CTA button
-  if (toolsUsed.includes('generate_booking_link') && !sendJobData.interactive && !interactiveHolder.message) {
+  // If AI used send_interactive_message tool, use the interactiveHolder message
+  if (interactiveHolder.message && !sendJobData.interactive) {
+    sendJobData.interactive = interactiveHolder.message;
+    console.log('[AI-PIPELINE] Using AI-generated interactive message:', interactiveHolder.message);
+  }
+
+  // Booking link CTA conversion (the ONE allowed post-process — functional, not corrective)
+  if (toolsUsed.includes('generate_booking_link') && !sendJobData.interactive) {
     const urlMatch = aiText.match(/(https?:\/\/irb\.saraiva\.ai\/agendar\/[a-zA-Z0-9_-]+)/);
     if (urlMatch) {
       const bookingUrl = urlMatch[1];
-      // Remove URL from text so it's not duplicated
       const cleanText = aiText
         .replace(urlMatch[0], '')
         .replace(/\n{2,}/g, '\n\n')
         .replace(/:\s*$/m, '')
         .trim();
 
-      interactiveHolder.message = {
+      sendJobData.interactive = {
         type: 'buttons',
         text: cleanText || aiText,
         buttons: [
-          { id: `url:${bookingUrl}`, text: 'Agendar consulta' },
+          { id: `url:${bookingUrl}`, text: 'Agendar Agora' },
         ],
         footerText: 'IRB Prime Care',
       };
-      sendJobData.interactive = interactiveHolder.message;
       aiText = cleanText || aiText;
       sendJobData.text = aiText;
-      console.log(`[AI-PIPELINE] 📅 Booking link converted to CTA button: ${bookingUrl}`);
+      console.log(`[AI-PIPELINE] Booking link converted to CTA button: ${bookingUrl}`);
     }
   }
 
@@ -1784,22 +1773,20 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
     (sendJobData as any).sendLocation = true;
   }
 
+  // 14. Enqueue to message-send
   await messageSendQueue.add('send', sendJobData, {
     removeOnComplete: 100,
     removeOnFail: 500,
   });
 
-  // 13. 🔥 RECUPERADOR DE ATENÇÃO — Agenda quando enviamos mensagem interativa
-  // Se enviamos botões, esperamos resposta. Se não vier, ativa o recuperador.
+  // 15. Schedule attention recovery only for booking context
   if (
-    interactiveHolder.message &&
-    !escalationCheck.shouldEscalate &&
+    (route.buttons || interactiveHolder.message) &&
+    !shouldEscalate &&
     (intent === 'appointment_booking' || toolsUsed.includes('generate_booking_link') || toolsUsed.includes('book_appointment'))
   ) {
-    // Determina contexto para mensagens de recuperação
     const recoveryContext = intent === 'appointment_booking' ? 'agendamento'
       : intent === 'price_inquiry' ? 'precos'
-      : intent === 'service_info' ? 'informacoes'
       : 'conversa';
 
     await followUpQueue.add('follow-up', {
@@ -1810,21 +1797,21 @@ export async function processAiPipeline(job: Job<AiPipelineJobData>) {
       attempt: 1,
       lastContext: recoveryContext,
     }, {
-      delay: 30 * 60 * 1000, // Primeira tentativa em 30 minutos
+      delay: 30 * 60 * 1000,
       removeOnComplete: 50,
-      jobId: `attention_recovery_${conversationId}`, // ID único para poder cancelar
+      jobId: `attention_recovery_${conversationId}`,
     });
 
-    console.log(`[AI-PIPELINE] 🔥 Attention recovery scheduled for ${patientPhone} in 30min`);
+    console.log(`[AI-PIPELINE] Attention recovery scheduled for ${patientPhone} in 30min`);
   }
 
-  // 14. Enqueue analytics
+  // 16. Enqueue analytics
   await analyticsQueue.add('update', {
     conversationId,
     intent,
     latencyMs,
     toolsUsed,
-    escalated: escalationCheck.shouldEscalate,
+    escalated: shouldEscalate,
   }, { removeOnComplete: 50 });
 
   return { status: 'processed', intent, latencyMs, toolsUsed };

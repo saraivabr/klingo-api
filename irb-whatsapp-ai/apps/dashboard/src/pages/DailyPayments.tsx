@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, CheckCircle2, CreditCard, Landmark, RefreshCw, Search, Wallet2 } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -94,10 +94,19 @@ function Surface({
 export default function DailyPayments() {
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<DailyQueueResponse | null>(null);
   const [bankPosition, setBankPosition] = useState<BankPosition | null>(null);
   const [cardPurchases, setCardPurchases] = useState<CreditCardPurchase[]>([]);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(value), 400);
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -105,11 +114,15 @@ export default function DailyPayments() {
       const [queueResponse, bankResponse, cardResponse] = await Promise.all([
         api.getDailyPaymentQueue(selectedDate),
         api.getBankPosition(selectedDate),
-        api.getCreditCardPurchases({ limit: '8', status: 'active', search }),
+        api.getCreditCardPurchases({ limit: '8', status: 'active', search: debouncedSearch }),
       ]);
       setQueue(queueResponse);
       setBankPosition(bankResponse);
       setCardPurchases(cardResponse.items);
+    } catch (err: any) {
+      console.error('DailyPayments load error:', err);
+      setError(err.message || 'Erro ao carregar agenda financeira');
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
     }
@@ -117,7 +130,7 @@ export default function DailyPayments() {
 
   useEffect(() => {
     load();
-  }, [selectedDate, search]);
+  }, [selectedDate, debouncedSearch]);
 
   const filteredQueue = useMemo(() => {
     if (!queue) return [];
@@ -129,13 +142,25 @@ export default function DailyPayments() {
   }, [queue, search]);
 
   const handleApprove = async (id: string) => {
-    await api.approvePayment(id);
-    await load();
+    try {
+      await api.approvePayment(id);
+      await load();
+    } catch (err: any) {
+      console.error('Approve error:', err);
+      setError(err.message || 'Erro ao aprovar pagamento');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const handlePay = async (id: string) => {
-    await api.payAccount(id, { paymentDate: selectedDate });
-    await load();
+    try {
+      await api.payAccount(id, { paymentDate: selectedDate });
+      await load();
+    } catch (err: any) {
+      console.error('Pay error:', err);
+      setError(err.message || 'Erro ao registrar pagamento');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const runway = (bankPosition?.totalBalance || 0) - ((queue?.summary.pendingTotalCents || 0) + (queue?.summary.approvedTotalCents || 0));
@@ -146,6 +171,11 @@ export default function DailyPayments() {
 
   return (
     <div className="space-y-6 px-6 py-6">
+      {error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      )}
       <section className="overflow-hidden rounded-[28px] border border-slate-900 bg-slate-950 text-white shadow-2xl shadow-slate-950/15">
         <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.4fr_0.95fr] lg:px-8">
           <div>
@@ -229,7 +259,7 @@ export default function DailyPayments() {
                 <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => handleSearchChange(event.target.value)}
                   placeholder="Buscar fornecedor ou descrição"
                   className="w-64 rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none"
                 />

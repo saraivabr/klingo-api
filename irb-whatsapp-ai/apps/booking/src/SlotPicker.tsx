@@ -52,7 +52,7 @@ export default function SlotPicker({ specialty, slots, service, onSelect }: Prop
               {service.durationMinutes ? ` · ${service.durationMinutes} min` : ''}
             </p>
           )}
-          <p className="text-sm mt-3 text-irb-gold-light">Escolha o melhor horario para voce</p>
+          <p className="text-sm mt-3 text-irb-gold-light">Escolha o melhor hor\u00e1rio para voc\u00ea</p>
         </div>
       </div>
 
@@ -60,8 +60,8 @@ export default function SlotPicker({ specialty, slots, service, onSelect }: Prop
       <div className="max-w-lg mx-auto px-5 py-6 space-y-6">
         {dates.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500">Nenhum horario disponivel no momento</p>
-            <p className="text-sm text-gray-400 mt-2">Entre em contato pelo WhatsApp para mais opcoes</p>
+            <p className="text-gray-500">Nenhum hor\u00e1rio dispon\u00edvel no momento</p>
+            <p className="text-sm text-gray-400 mt-2">Entre em contato pelo WhatsApp para mais op\u00e7\u00f5es</p>
           </div>
         )}
 

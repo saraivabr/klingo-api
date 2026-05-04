@@ -231,9 +231,19 @@ export default function PDV() {
     }
   }
 
+  const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
   function startPolling(asaasPaymentId: string) {
     if (pollRef.current) clearInterval(pollRef.current);
+    const startedAt = Date.now();
     pollRef.current = setInterval(async () => {
+      // Stop polling after 10 minutes
+      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setPaymentStatus('TIMEOUT');
+        return;
+      }
+
       try {
         const status = await api.pdvGetPaymentStatus(asaasPaymentId);
         setPaymentStatus(status.status);
@@ -276,6 +286,7 @@ export default function PDV() {
   }
 
   const isPaid = ['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'].includes(paymentStatus);
+  const isTimedOut = paymentStatus === 'TIMEOUT';
 
   // === PAYMENT RESULT SCREEN ===
   if (paymentResult) {
@@ -283,12 +294,21 @@ export default function PDV() {
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="max-w-lg mx-auto">
           {/* Status Header */}
-          <div className={`rounded-2xl p-8 text-center mb-6 ${isPaid ? 'bg-emerald-50 border-2 border-emerald-200' : 'bg-amber-50 border-2 border-amber-200'}`}>
+          <div className={`rounded-2xl p-8 text-center mb-6 ${isPaid ? 'bg-emerald-50 border-2 border-emerald-200' : isTimedOut ? 'bg-red-50 border-2 border-red-200' : 'bg-amber-50 border-2 border-amber-200'}`}>
             {isPaid ? (
               <>
                 <CheckCircle2 className="w-16 h-16 text-emerald-500 mx-auto mb-3" />
                 <h2 className="text-2xl font-bold text-emerald-700">Pagamento Confirmado!</h2>
                 <p className="text-emerald-600 mt-1">{formatReais(paymentResult.value)}</p>
+              </>
+            ) : isTimedOut ? (
+              <>
+                <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-3" />
+                <h2 className="text-2xl font-bold text-red-700">Tempo Esgotado</h2>
+                <p className="text-red-600 mt-1">{formatReais(paymentResult.value)}</p>
+                <p className="text-sm text-red-500 mt-2">
+                  Tempo esgotado. Verifique o status manualmente.
+                </p>
               </>
             ) : (
               <>
@@ -303,7 +323,7 @@ export default function PDV() {
           </div>
 
           {/* PIX QR Code */}
-          {paymentResult.pix && !isPaid && (
+          {paymentResult.pix && !isPaid && !isTimedOut && (
             <div className="bg-white rounded-2xl shadow-sm border p-6 mb-4 text-center">
               <h3 className="font-semibold text-gray-700 mb-4 flex items-center justify-center gap-2">
                 <QrCode className="w-5 h-5" /> PIX - Escaneie o QR Code
@@ -367,8 +387,8 @@ export default function PDV() {
               )}
               <div className="flex justify-between">
                 <span className="text-gray-500">Status</span>
-                <span className={`font-medium ${isPaid ? 'text-emerald-600' : 'text-amber-600'}`}>
-                  {isPaid ? 'Pago' : paymentStatus}
+                <span className={`font-medium ${isPaid ? 'text-emerald-600' : isTimedOut ? 'text-red-600' : 'text-amber-600'}`}>
+                  {isPaid ? 'Pago' : isTimedOut ? 'Tempo esgotado' : paymentStatus}
                 </span>
               </div>
             </div>

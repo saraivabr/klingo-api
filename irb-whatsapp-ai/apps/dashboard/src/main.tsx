@@ -29,6 +29,9 @@ import PDV from './pages/PDV';
 import CRMPipeline from './pages/CRMPipeline';
 import CRMMetrics from './pages/CRMMetrics';
 import CRMCampaigns from './pages/CRMCampaigns';
+import Hub from './pages/Hub';
+import Plans from './pages/Plans';
+import Indicators from './pages/Indicators';
 
 function App() {
   const token = localStorage.getItem('token');
@@ -53,6 +56,7 @@ function App() {
          <Route path="/lab" element={<LabTests />} />
          <Route path="/pharmacy" element={<Pharmacy />} />
          <Route path="/metrics" element={<Metrics />} />
+         <Route path="/indicators" element={<Indicators />} />
          <Route path="/subscriptions" element={<Subscriptions />} />
          <Route path="/finance" element={<Finance />} />
          <Route path="/finance/payable" element={<AccountsPayable />} />
@@ -68,6 +72,8 @@ function App() {
          <Route path="/teleconsulta" element={<Teleconsultation />} />
          <Route path="/pdv" element={<PDV />} />
          <Route path="/users" element={<Users />} />
+         <Route path="/hub" element={<Hub />} />
+         <Route path="/plans" element={<Plans />} />
          <Route path="/settings" element={<Settings />} />
        </Route>
        <Route path="/conversations/:id" element={<Chat />} />
@@ -78,7 +84,7 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/painel">
       <App />
     </BrowserRouter>
   </React.StrictMode>

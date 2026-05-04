@@ -50,6 +50,10 @@ const intelligence = safeRequire(path.join(helpersDir, 'intelligence.cjs'));
 // Get the command from argv
 const [,, command, ...args] = process.argv;
 
+function emitCodexHookJson(fields = {}) {
+  process.stdout.write(`${JSON.stringify(fields)}\n`);
+}
+
 // Read stdin with timeout — Claude Code sends hook data as JSON via stdin.
 // Timeout prevents hanging when stdin is not properly closed (common on Windows).
 async function readStdin() {
@@ -139,11 +143,22 @@ const handlers = {
     const dangerous = ['rm -rf /', 'format c:', 'del /s /q c:\\', ':(){:|:&};:'];
     for (const d of dangerous) {
       if (cmd.includes(d)) {
-        console.error(`[BLOCKED] Dangerous command detected: ${d}`);
+        emitCodexHookJson({ blocked: true, reason: `Dangerous command detected: ${d}` });
         process.exit(1);
       }
     }
-    console.log('[OK] Command validated');
+    emitCodexHookJson();
+  },
+
+  'pre-edit': () => {
+    emitCodexHookJson();
+  },
+
+  'post-bash': () => {
+    if (session && session.metric) {
+      try { session.metric('bash'); } catch (e) { /* no active session */ }
+    }
+    emitCodexHookJson();
   },
 
   'post-edit': () => {
@@ -159,7 +174,7 @@ const handlers = {
         intelligence.recordEdit(file);
       } catch (e) { /* non-fatal */ }
     }
-    console.log('[OK] Edit recorded');
+    emitCodexHookJson();
   },
 
   'session-restore': () => {

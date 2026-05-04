@@ -99,6 +99,8 @@ export async function financeRoutes(app: FastifyInstance) {
       name: schema.plans.name,
       slug: schema.plans.slug,
       priceCents: schema.plans.priceCents,
+      priceSemestralCents: schema.plans.priceSemestralCents,
+      priceAnnualCents: schema.plans.priceAnnualCents,
       description: schema.plans.description,
       features: schema.plans.features,
       isActive: schema.plans.isActive,
@@ -109,6 +111,7 @@ export async function financeRoutes(app: FastifyInstance) {
       )`,
     })
       .from(schema.plans)
+      .where(eq(schema.plans.isActive, true))
       .orderBy(schema.plans.priceCents);
 
     return { plans: plansList };
@@ -117,15 +120,37 @@ export async function financeRoutes(app: FastifyInstance) {
   // Update plan
   app.put('/plans/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { priceCents, description, features, isActive } = request.body as {
+    const {
+      name,
+      priceCents,
+      priceSemestralCents,
+      priceAnnualCents,
+      description,
+      features,
+      isActive,
+    } = request.body as {
+      name?: string;
       priceCents?: number;
+      priceSemestralCents?: number | null;
+      priceAnnualCents?: number | null;
       description?: string;
       features?: any;
       isActive?: boolean;
     };
 
     const updates: Record<string, any> = {};
+    if (name !== undefined) updates.name = name;
     if (priceCents !== undefined) updates.priceCents = priceCents;
+    if (priceSemestralCents !== undefined) {
+      updates.priceSemestralCents = priceSemestralCents === null || priceSemestralCents === 0
+        ? null
+        : priceSemestralCents;
+    }
+    if (priceAnnualCents !== undefined) {
+      updates.priceAnnualCents = priceAnnualCents === null || priceAnnualCents === 0
+        ? null
+        : priceAnnualCents;
+    }
     if (description !== undefined) updates.description = description;
     if (features !== undefined) updates.features = features;
     if (isActive !== undefined) updates.isActive = isActive;

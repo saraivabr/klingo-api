@@ -90,6 +90,36 @@ body {
   background-size: 200% 100%;
 }
 
+/* Sidebar slide-in (mobile) */
+@keyframes sidebarSlideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.sidebar-slide-in {
+  animation: sidebarSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Toast slide-in */
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.toast-slide-in {
+  animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* Subtle noise texture */
 .noise-texture::after {
   content: '';

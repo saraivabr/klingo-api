@@ -1,0 +1,70 @@
+{
+  "pages": {
+    "/not-found": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/411-370ffe8444ef2f88.js",
+      "static/chunks/app/not-found-cb9d45aeb367c1c6.js"
+    ],
+    "/_not-found/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/app/_not-found/page-bb0386d001e33d75.js"
+    ],
+    "/layout": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/css/0d5dde4e23f9309e.css",
+      "static/chunks/app/layout-e896a756bee798fa.js"
+    ],
+    "/confirmado/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/app/confirmado/page-4e8f28a025cd9fc3.js"
+    ],
+    "/equipe-medica/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/app/equipe-medica/page-640723a4c73a586a.js"
+    ],
+    "/agendar/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/app/agendar/page-d29b8c6d8ae222c9.js"
+    ],
+    "/pagamento/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/app/pagamento/page-3fdf92f3f244ff83.js"
+    ],
+    "/especialidades/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/app/especialidades/page-e5e13c2667417a97.js"
+    ],
+    "/page": [
+      "static/chunks/webpack-2e534b1aef5f9925.js",
+      "static/chunks/5b8f0dd8-535379dfdada73c5.js",
+      "static/chunks/749-85f29caa80145b63.js",
+      "static/chunks/main-app-5916bd73ecb061f0.js",
+      "static/chunks/589-b7f8c4e57dfd004e.js",
+      "static/chunks/app/page-c7c280575e3c8503.js"
+    ]
+  }
+}

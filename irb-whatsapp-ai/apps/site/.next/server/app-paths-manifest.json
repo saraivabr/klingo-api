@@ -1,0 +1,12 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/manifest.webmanifest/route": "app/manifest.webmanifest/route.js",
+  "/robots.txt/route": "app/robots.txt/route.js",
+  "/sitemap.xml/route": "app/sitemap.xml/route.js",
+  "/confirmado/page": "app/confirmado/page.js",
+  "/equipe-medica/page": "app/equipe-medica/page.js",
+  "/agendar/page": "app/agendar/page.js",
+  "/pagamento/page": "app/pagamento/page.js",
+  "/especialidades/page": "app/especialidades/page.js",
+  "/page": "app/page.js"
+}

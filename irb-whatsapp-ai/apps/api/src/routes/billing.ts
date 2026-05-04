@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { db, schema } from '@irb/database';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, ilike, or } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth.js';
 import { randomUUID } from 'crypto';
 import * as billingWorkflow from '../services/billing-workflow.js';
@@ -112,6 +112,16 @@ export async function billingRoutes(app: FastifyInstance) {
     if (patientId) {
       conditions.push(eq(schema.bills.patientId, patientId));
     }
+    if (search) {
+      conditions.push(
+        or(
+          ilike(schema.patients.name, `%${search}%`),
+          ilike(schema.bills.billNumber, `%${search}%`)
+        )
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const bills = await db.select({
       id: schema.bills.id,
@@ -127,24 +137,17 @@ export async function billingRoutes(app: FastifyInstance) {
     })
       .from(schema.bills)
       .innerJoin(schema.patients, eq(schema.bills.patientId, schema.patients.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(whereClause)
       .orderBy(desc(schema.bills.createdAt))
       .limit(parseInt(limit))
       .offset(offset);
 
-    // Filter by search on the application side (patient name or bill number)
-    const filtered = search
-      ? bills.filter(b =>
-          b.patientName?.toLowerCase().includes(search.toLowerCase()) ||
-          b.billNumber?.toLowerCase().includes(search.toLowerCase())
-        )
-      : bills;
-
     const [countResult] = await db.select({ count: sql<number>`count(*)` })
       .from(schema.bills)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
+      .innerJoin(schema.patients, eq(schema.bills.patientId, schema.patients.id))
+      .where(whereClause);
 
-    return { bills: filtered, total: Number(countResult.count) };
+    return { bills, total: Number(countResult.count) };
   });
 
   // GET /api/billing/pending - list pending bills for collection

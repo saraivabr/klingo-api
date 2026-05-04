@@ -307,6 +307,8 @@ export default function CashFlow() {
   const [statementBusy, setStatementBusy] = useState(false);
   const [statementMessage, setStatementMessage] = useState<string | null>(null);
 
+  const [error, setError] = useState<string | null>(null);
+
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [dailyPosition, setDailyPosition] = useState<DailyPosition | null>(null);
   const [monthlyFlow, setMonthlyFlow] = useState<MonthlyFlow | null>(null);
@@ -316,14 +318,20 @@ export default function CashFlow() {
   const [snapshots, setSnapshots] = useState<SnapshotRow[]>([]);
 
   useEffect(() => {
-    Promise.all([api.getCashFlowSummary(), api.getCostCenters(), api.getBankAccounts()]).then(([dashboardSummary, centers, accounts]) => {
-      setSummary(dashboardSummary);
-      setCostCenters(centers.items);
-      setBankAccounts(accounts.items);
-      if (!statementBankId && accounts.items[0]?.id) {
-        setStatementBankId(accounts.items[0].id);
-      }
-    });
+    Promise.all([api.getCashFlowSummary(), api.getCostCenters(), api.getBankAccounts()])
+      .then(([dashboardSummary, centers, accounts]) => {
+        setSummary(dashboardSummary);
+        setCostCenters(centers.items);
+        setBankAccounts(accounts.items);
+        if (!statementBankId && accounts.items[0]?.id) {
+          setStatementBankId(accounts.items[0].id);
+        }
+      })
+      .catch((err) => {
+        console.error('CashFlow init error:', err);
+        setError(err.message || 'Erro ao carregar dados iniciais');
+        setTimeout(() => setError(null), 5000);
+      });
   }, []);
 
   useEffect(() => {
@@ -367,7 +375,13 @@ export default function CashFlow() {
               ? api.getDRE(selectedYear, selectedMonth).then(setDre)
               : api.getBankPosition(selectedDate).then(setBankPosition);
 
-    request.finally(() => setLoading(false));
+    request
+      .catch((err) => {
+        console.error('CashFlow tab load error:', err);
+        setError(err.message || 'Erro ao carregar aba');
+        setTimeout(() => setError(null), 5000);
+      })
+      .finally(() => setLoading(false));
   }, [activeTab, projectionDays, selectedCostCenter, selectedDate, selectedMonth, selectedYear]);
 
   const topCreditCategories = useMemo(
@@ -388,19 +402,25 @@ export default function CashFlow() {
   const hasMonthlyMovement = Boolean(monthlyFlow && (monthlyFlow.creditCount > 0 || monthlyFlow.debitCount > 0));
 
   const refresh = async () => {
-    const dashboardSummary = await api.getCashFlowSummary();
-    setSummary(dashboardSummary);
+    try {
+      const dashboardSummary = await api.getCashFlowSummary();
+      setSummary(dashboardSummary);
 
-    if (activeTab === 'daily') {
-      setDailyPosition(await api.getDailyCashFlow(selectedDate, selectedCostCenter || undefined));
-    } else if (activeTab === 'monthly') {
-      setMonthlyFlow(await api.getMonthlyCashFlow(selectedYear, selectedMonth, selectedCostCenter || undefined));
-    } else if (activeTab === 'projection') {
-      setProjection(await api.getCashFlowProjection(projectionDays, selectedCostCenter || undefined));
-    } else if (activeTab === 'dre') {
-      setDre(await api.getDRE(selectedYear, selectedMonth));
-    } else {
-      setBankPosition(await api.getBankPosition(selectedDate));
+      if (activeTab === 'daily') {
+        setDailyPosition(await api.getDailyCashFlow(selectedDate, selectedCostCenter || undefined));
+      } else if (activeTab === 'monthly') {
+        setMonthlyFlow(await api.getMonthlyCashFlow(selectedYear, selectedMonth, selectedCostCenter || undefined));
+      } else if (activeTab === 'projection') {
+        setProjection(await api.getCashFlowProjection(projectionDays, selectedCostCenter || undefined));
+      } else if (activeTab === 'dre') {
+        setDre(await api.getDRE(selectedYear, selectedMonth));
+      } else {
+        setBankPosition(await api.getBankPosition(selectedDate));
+      }
+    } catch (err: any) {
+      console.error('CashFlow refresh error:', err);
+      setError(err.message || 'Erro ao atualizar dados');
+      setTimeout(() => setError(null), 5000);
     }
   };
 
@@ -428,6 +448,11 @@ export default function CashFlow() {
       });
       setStatementPreview(preview);
       setStatementMessage('Prévia gerada com matching assistido por IA.');
+    } catch (err: any) {
+      console.error('Statement preview error:', err);
+      setStatementMessage(err.message || 'Erro ao gerar prévia do extrato');
+      setError(err.message || 'Erro ao gerar prévia do extrato');
+      setTimeout(() => setError(null), 5000);
     } finally {
       setStatementBusy(false);
     }
@@ -447,6 +472,11 @@ export default function CashFlow() {
       setStatementMessage('Extrato aplicado no financeiro.');
       await refresh();
       setBankPosition(await api.getBankPosition(selectedDate));
+    } catch (err: any) {
+      console.error('Statement apply error:', err);
+      setStatementMessage(err.message || 'Erro ao aplicar extrato');
+      setError(err.message || 'Erro ao aplicar extrato');
+      setTimeout(() => setError(null), 5000);
     } finally {
       setStatementBusy(false);
     }
@@ -462,6 +492,11 @@ export default function CashFlow() {
 
   return (
     <div className="space-y-6 px-6 py-6">
+      {error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      )}
       <section className="overflow-hidden rounded-[28px] border border-slate-900 bg-slate-950 text-white shadow-2xl shadow-slate-950/15">
         <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.4fr_0.9fr] lg:px-8">
           <div>

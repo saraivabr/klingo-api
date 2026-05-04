@@ -170,6 +170,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function AccountsPayable() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<AccountPayable[]>([]);
   const [total, setTotal] = useState(0);
   const [totalNet, setTotalNet] = useState(0);
@@ -208,21 +209,27 @@ export default function AccountsPayable() {
   const [dueDateTo, setDueDateTo] = useState('');
 
   const loadOverview = async () => {
-    const [queueResponse, overdueResponse, centersResponse, chartResponse, suppliersResponse, banksResponse] = await Promise.all([
-      api.getDailyPaymentQueue(),
-      api.getOverduePayables(),
-      api.getCostCenters(),
-      api.getChartOfAccounts('expense'),
-      api.getSuppliers(),
-      api.getBankAccounts(),
-    ]);
+    try {
+      const [queueResponse, overdueResponse, centersResponse, chartResponse, suppliersResponse, banksResponse] = await Promise.all([
+        api.getDailyPaymentQueue(),
+        api.getOverduePayables(),
+        api.getCostCenters(),
+        api.getChartOfAccounts('expense'),
+        api.getSuppliers(),
+        api.getBankAccounts(),
+      ]);
 
-    setDailyQueue(queueResponse);
-    setOverdue(overdueResponse);
-    setCostCenters(centersResponse.items);
-    setChartAccounts(chartResponse.items);
-    setSuppliers(suppliersResponse.items);
-    setBankAccounts(banksResponse.items);
+      setDailyQueue(queueResponse);
+      setOverdue(overdueResponse);
+      setCostCenters(centersResponse.items);
+      setChartAccounts(chartResponse.items);
+      setSuppliers(suppliersResponse.items);
+      setBankAccounts(banksResponse.items);
+    } catch (err: any) {
+      console.error('AP overview load error:', err);
+      setError(err.message || 'Erro ao carregar dados');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const loadTable = async () => {
@@ -261,26 +268,50 @@ export default function AccountsPayable() {
 
   const handleApprove = async (id: string) => {
     if (!window.confirm('Aprovar este pagamento?')) return;
-    await api.approvePayment(id);
-    await loadAll();
+    try {
+      await api.approvePayment(id);
+      await loadAll();
+    } catch (err: any) {
+      console.error('Approve error:', err);
+      setError(err.message || 'Erro ao aprovar pagamento');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const handlePay = async (id: string) => {
     if (!window.confirm('Registrar esse pagamento como pago hoje?')) return;
-    await api.payAccount(id, { paymentDate: new Date().toISOString().slice(0, 10) });
-    await loadAll();
+    try {
+      await api.payAccount(id, { paymentDate: new Date().toISOString().slice(0, 10) });
+      await loadAll();
+    } catch (err: any) {
+      console.error('Pay error:', err);
+      setError(err.message || 'Erro ao registrar pagamento');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const handleCancel = async (id: string) => {
     if (!window.confirm('Cancelar esta conta a pagar?')) return;
-    await api.cancelAccountPayable(id);
-    await loadAll();
+    try {
+      await api.cancelAccountPayable(id);
+      await loadAll();
+    } catch (err: any) {
+      console.error('Cancel error:', err);
+      setError(err.message || 'Erro ao cancelar conta');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const openDetail = async (id: string) => {
-    const response = await api.getAccountPayable(id);
-    setSelectedItem(response);
-    setDetailOpen(true);
+    try {
+      const response = await api.getAccountPayable(id);
+      setSelectedItem(response);
+      setDetailOpen(true);
+    } catch (err: any) {
+      console.error('Detail load error:', err);
+      setError(err.message || 'Erro ao carregar detalhes');
+      setTimeout(() => setError(null), 5000);
+    }
   };
 
   const handleCreateAccount = async () => {
@@ -336,6 +367,11 @@ export default function AccountsPayable() {
 
   return (
     <div className="space-y-6 px-6 py-6">
+      {error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      )}
       <section className="overflow-hidden rounded-[28px] border border-slate-900 bg-slate-950 text-white shadow-2xl shadow-slate-950/15">
         <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.35fr_0.95fr] lg:px-8">
           <div>
