@@ -13,6 +13,7 @@ import { FastifyInstance } from 'fastify';
 import { getKlingoExternalClient } from '../services/klingo-external-client.js';
 import { db, schema } from '@irb/database';
 import { eq, and, ilike, gte, lt, ne } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 
 // Map specialty names to procedure IDs for slot lookup
 // Synced with booking.ts CONSULTA_PROCEDURE_MAP (canonical source)
@@ -57,6 +58,27 @@ function toTitleCase(str: string): string {
   return str.toLowerCase().replace(/(?:^|\s|[-/])\w/g, (c) => c.toUpperCase());
 }
 
+function toBirthDateISO(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length !== 8) return raw;
+  return `${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
+}
+
+function parsePriceCents(rawPrice: unknown): number | undefined {
+  if (typeof rawPrice === 'number') {
+    return Math.round(rawPrice * (rawPrice > 1000 ? 1 : 100));
+  }
+  if (typeof rawPrice === 'string') {
+    const normalized = Number(rawPrice.replace(/\./g, '').replace(',', '.'));
+    if (Number.isFinite(normalized)) {
+      return Math.round(normalized * (normalized > 1000 ? 1 : 100));
+    }
+  }
+  return undefined;
+}
+
 export async function publicSchedulingRoutes(app: FastifyInstance) {
 
   // GET /specialties - list available specialties
@@ -98,7 +120,8 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
   app.get('/exams', async (_request, reply) => {
     const klingoExt = getKlingoExternalClient();
     if (!klingoExt) {
-      return reply.send({ source: 'fallback', exams: getFallbackExams() });
+      app.log.warn({ endpoint: 'public-scheduling.exams', reason: 'missing_klingo_client' }, 'Public exams unavailable');
+      return reply.status(503).send({ source: 'none', exams: [], error: 'Catalogo de exames indisponivel no Klingo.' });
     }
 
     try {
@@ -108,23 +131,22 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
         : Array.isArray(result?.exames) ? result.exames : [];
 
       if (exams.length === 0) {
-        return reply.send({ source: 'fallback', exams: getFallbackExams() });
+        app.log.warn({ endpoint: 'public-scheduling.exams', reason: 'empty_payload' }, 'Klingo exams returned no items');
+        return reply.status(503).send({ source: 'none', exams: [], error: 'Klingo nao retornou exames para agendamento publico.' });
       }
 
       const visible = exams
         .map((exam: any) => {
           const id = exam.id || exam.codigo || exam.id_procedimento;
-          const name = exam.nome || exam.name || exam.descricao || exam.procedimento;
+          const name = exam.nome || exam.name || exam.descricao || exam.descr || exam.procedimento;
           if (!id || !name) return null;
           const rawPrice = exam.valor ?? exam.preco ?? exam.price ?? exam.valor_particular;
-          const priceCents = typeof rawPrice === 'number'
-            ? Math.round(rawPrice * (rawPrice > 1000 ? 1 : 100))
-            : undefined;
+          const priceCents = parsePriceCents(rawPrice);
 
           return {
             id: String(id),
             name: toTitleCase(String(name)),
-            category: exam.categoria || exam.especialidade?.nome || exam.especialidade || 'Exame',
+            category: exam.categoria || exam.especialidade?.nome || exam.especialidade?.descr || exam.especialidade || 'Exame',
             priceCents,
             durationMinutes: exam.duracao || exam.durationMinutes || 30,
           };
@@ -133,13 +155,14 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
         .slice(0, 120);
 
       if (visible.length === 0) {
-        return reply.send({ source: 'fallback', exams: getFallbackExams() });
+        app.log.warn({ endpoint: 'public-scheduling.exams', reason: 'unparsed_payload', sampleKeys: Object.keys(exams[0] || {}) }, 'Klingo exams could not be parsed');
+        return reply.status(503).send({ source: 'none', exams: [], error: 'Catalogo de exames retornou em formato inesperado.' });
       }
 
       return reply.send({ source: 'klingo', exams: visible });
     } catch (err: any) {
-      console.error('[public-scheduling] getExams error:', err.message);
-      return reply.send({ source: 'fallback', exams: getFallbackExams() });
+      app.log.error({ err, endpoint: 'public-scheduling.exams' }, 'Klingo exams lookup failed');
+      return reply.status(502).send({ source: 'none', exams: [], error: 'Falha ao consultar o catalogo de exames no Klingo.' });
     }
   });
 
@@ -385,18 +408,25 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
         return reply.send({ source: 'klingo', slots: uniqueSlots });
       }
 
-      // No real slots available: keep the site usable and mark booking for manual confirmation.
+      app.log.warn({
+        endpoint: 'public-scheduling.slots',
+        reason: 'empty_schedule',
+        exame: exameId,
+        especialidade: especialidadeId,
+        profissional: profissional ? parseInt(profissional) : undefined,
+        availableProfessionals: Array.isArray(result?.profissionais) ? result.profissionais.length : Array.isArray(result?.horarios) ? result.horarios.length : undefined,
+      }, 'Klingo returned no public slots');
       return reply.send({
-        source: 'fallback',
-        slots: generateFallbackSlots(inicio, fim),
-        message: 'Horarios sugeridos para confirmacao manual pela equipe.',
+        source: 'none',
+        slots: [],
+        message: 'Sem horarios online disponiveis para este exame no Klingo.',
       });
     } catch (err: any) {
-      console.error('[public-scheduling] getSlots error:', err.message);
+      app.log.error({ err, endpoint: 'public-scheduling.slots', exame, especialidade, profissional }, 'Klingo slots lookup failed');
       return reply.send({
-        source: 'fallback',
-        slots: generateFallbackSlots(inicio, fim),
-        message: 'Horarios sugeridos para confirmacao manual pela equipe.',
+        source: 'none',
+        slots: [],
+        message: 'Falha ao consultar horarios online no Klingo.',
       });
     }
   });
@@ -419,6 +449,8 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
       paymentMethod,
       requestId,
       requestFileName,
+      manualConfirmationRequired,
+      schedulingSource,
     } = request.body as {
       patientName: string;
       patientPhone: string;
@@ -431,10 +463,12 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
       slotDateTime: string;
       slotSource?: 'klingo' | 'fallback';
       klingoSlotId?: string | number;
-      selectedExams?: Array<{ id: string; name: string; priceCents?: number }>;
+      selectedExams?: Array<{ id: string; name: string; category?: string; priceCents?: number }>;
       paymentMethod?: string;
       requestId?: string;
       requestFileName?: string;
+      manualConfirmationRequired?: boolean;
+      schedulingSource?: 'klingo' | 'fallback' | 'none';
     };
 
     if (!patientName || !patientPhone || !specialty || !slotDateTime) {
@@ -443,15 +477,102 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
       });
     }
 
+    if (!Array.isArray(selectedExams) || selectedExams.length === 0) {
+      return reply.status(400).send({ error: 'Selecione pelo menos um exame' });
+    }
+
+    if (!requestId) {
+      return reply.status(400).send({ error: 'Pedido medico em imagem e obrigatorio' });
+    }
+
+    if (slotSource !== 'klingo' || !klingoSlotId) {
+      return reply.status(409).send({ error: 'Este agendamento exige um horario online real do Klingo.' });
+    }
+
+    const allowedPaymentMethods = new Set(['pix', 'card', 'clinic', 'insurance', 'attendant']);
+    const normalizedPaymentMethod = allowedPaymentMethods.has(paymentMethod || '') ? paymentMethod : 'attendant';
     const slotDate = new Date(slotDateTime);
     if (isNaN(slotDate.getTime()) || slotDate <= new Date()) {
       return reply.status(400).send({ error: 'Horario invalido ou no passado' });
     }
 
+    const klingoExt = getKlingoExternalClient();
+    let klingoPatientId: number | undefined;
+    let klingoReservationId: string | undefined;
     try {
+      const cleanPhone = patientPhone.replace(/\D/g, '');
+      const phoneForKlingo = cleanPhone.replace(/^55/, '');
+      const cleanCpf = cpf?.replace(/\D/g, '');
+      const birthDateIso = toBirthDateISO(birthDate);
+      const isKlingoSlot = Boolean(klingoSlotId && klingoExt);
+      let klingoVoucherId: number | undefined;
+      let klingoSyncStatus = process.env.KLINGO_APP_TOKEN ? 'pending' : 'skipped';
+      let klingoSyncError: string | undefined;
+
+      if (isKlingoSlot) {
+        if (cleanCpf) {
+          try {
+            const cpfResult = await klingoExt.identifyPatientByCpf(cleanCpf);
+            klingoPatientId = klingoExt.extractPatientId(cpfResult) || undefined;
+          } catch (err: any) {
+            app.log.warn({ err }, '[public-scheduling] CPF lookup failed');
+          }
+        }
+
+        if (!klingoPatientId && phoneForKlingo) {
+          try {
+            const phoneResult = await klingoExt.identifyPatientByPhone(phoneForKlingo);
+            klingoPatientId = klingoExt.extractPatientId(phoneResult) || undefined;
+          } catch (err: any) {
+            app.log.warn({ err }, '[public-scheduling] phone lookup failed');
+          }
+        }
+
+        if (!klingoPatientId && cleanCpf && birthDateIso && phoneForKlingo) {
+          try {
+            const registerResult = await klingoExt.registerPatient({
+              paciente: {
+                nome: patientName,
+                sexo: 'M',
+                dt_nasc: birthDateIso,
+                docs: { cpf: cleanCpf },
+                contatos: {
+                  celular: phoneForKlingo,
+                  ...(email ? { email } : {}),
+                },
+              },
+            });
+            if (registerResult.data?.id) {
+              klingoPatientId = registerResult.data.id;
+            }
+          } catch (err: any) {
+            app.log.warn({ err }, '[public-scheduling] patient registration failed');
+          }
+        }
+
+        if (klingoPatientId) {
+          try {
+            const reservation = await klingoExt.reserveSlot(klingoPatientId, {
+              id_horario: Number(klingoSlotId),
+              id_paciente: klingoPatientId,
+            });
+            if (reservation.data?.id) {
+              klingoReservationId = reservation.data.id;
+            } else {
+              return reply.status(409).send({ error: 'Este horario nao esta mais disponivel no Klingo. Escolha outro.' });
+            }
+          } catch (err: any) {
+            app.log.error({ err }, '[public-scheduling] reserveSlot failed');
+            return reply.status(409).send({ error: 'Este horario nao esta mais disponivel. Escolha outro.' });
+          }
+        } else {
+          klingoSyncStatus = 'failed';
+          klingoSyncError = 'Paciente nao identificado/registrado no Klingo';
+        }
+      }
+
       // Find or create patient
       let patientId: string | undefined;
-      const cleanPhone = patientPhone.replace(/\D/g, '');
 
       const [existingPatient] = await db.select().from(schema.patients)
         .where(eq(schema.patients.phone, cleanPhone))
@@ -461,6 +582,9 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
         patientId = existingPatient.id;
         const updates: Record<string, unknown> = { updatedAt: new Date() };
         if (!existingPatient.name && patientName) updates.name = patientName;
+        if (!existingPatient.cpfHash && cleanCpf) updates.cpfHash = createHash('sha256').update(cleanCpf).digest('hex');
+        if (!existingPatient.birthDate && birthDateIso) updates.birthDate = birthDateIso;
+        if (klingoPatientId && !existingPatient.klingoPatientId) updates.klingoPatientId = klingoPatientId;
         if (Object.keys(updates).length > 1) {
           await db.update(schema.patients).set(updates)
             .where(eq(schema.patients.id, existingPatient.id));
@@ -469,6 +593,9 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
         const [newPatient] = await db.insert(schema.patients).values({
           phone: cleanPhone,
           name: patientName,
+          cpfHash: cleanCpf ? createHash('sha256').update(cleanCpf).digest('hex') : undefined,
+          birthDate: birthDateIso,
+          klingoPatientId: klingoPatientId || undefined,
           source: 'website',
         }).returning({ id: schema.patients.id });
         patientId = newPatient.id;
@@ -494,35 +621,96 @@ export async function publicSchedulingRoutes(app: FastifyInstance) {
       }
 
       // Create appointment
-      const totalCents = (selectedExams || []).reduce((sum, exam) => sum + (exam.priceCents || 0), 0);
+      const totalCents = selectedExams.reduce((sum, exam) => sum + (exam.priceCents || 0), 0);
+      const requiresManualConfirmation = !klingoReservationId;
+      const operationalStatus = requiresManualConfirmation ? 'pending_manual_confirmation' : 'confirmed';
       const [appointment] = await db.insert(schema.appointments).values({
         patientId,
         doctorId: resolvedDoctorId || undefined,
         scheduledAt: slotDate,
-        status: 'pending_confirmation',
+        status: requiresManualConfirmation ? 'pending_confirmation' : 'scheduled',
         notes: JSON.stringify({
           source: 'site-exam-scheduling',
-          selectedExams: selectedExams || [],
+          operationalStatus,
+          selectedExams,
           totalCents,
-          paymentMethod: paymentMethod || null,
+          paymentMethod: normalizedPaymentMethod,
           cpfProvided: Boolean(cpf),
           birthDate: birthDate || null,
           email: email || null,
-          requestId: requestId || null,
+          requestId,
           requestFileName: requestFileName || null,
+          slotSource: slotSource || null,
+          schedulingSource: schedulingSource || slotSource || null,
+          manualConfirmationRequired: requiresManualConfirmation,
           klingoSlotId: klingoSlotId || null,
           operationalWarning: 'Paciente deve apresentar o pedido fisico na recepcao.',
         }),
         createdBy: 'website',
-        klingoSyncStatus: slotSource === 'klingo' ? 'pending' : 'manual_required',
+        klingoSyncStatus: requiresManualConfirmation ? 'manual_required' : 'pending',
+        klingoReservationId: klingoReservationId || undefined,
+        klingoSyncError: klingoSyncError || undefined,
       }).returning({ id: schema.appointments.id });
+
+      let confirmedInKlingo = false;
+      if (klingoReservationId && klingoPatientId && klingoExt) {
+        try {
+          const confirmation = await klingoExt.confirmBooking(klingoPatientId, {
+            id_reserva: klingoReservationId,
+            id_paciente: klingoPatientId,
+          });
+          klingoVoucherId = confirmation.data?.voucher_id;
+          await db.update(schema.appointments).set({
+            status: 'scheduled',
+            klingoSyncStatus: 'synced',
+            klingoVoucherId: klingoVoucherId ?? null,
+            klingoSyncError: null,
+            notes: JSON.stringify({
+              source: 'site-exam-scheduling',
+              operationalStatus: 'confirmed',
+              selectedExams,
+              totalCents,
+              paymentMethod: normalizedPaymentMethod,
+              cpfProvided: Boolean(cpf),
+              birthDate: birthDate || null,
+              email: email || null,
+              requestId,
+              requestFileName: requestFileName || null,
+              slotSource: slotSource || null,
+              schedulingSource: schedulingSource || slotSource || null,
+              manualConfirmationRequired: false,
+              klingoSlotId: klingoSlotId || null,
+              operationalWarning: 'Paciente deve apresentar o pedido fisico na recepcao.',
+            }),
+          }).where(eq(schema.appointments.id, appointment.id));
+          confirmedInKlingo = true;
+        } catch (err: any) {
+          app.log.error({ err }, '[public-scheduling] confirmBooking failed');
+          await db.update(schema.appointments).set({
+            status: 'pending_confirmation',
+            klingoSyncStatus: 'failed',
+            klingoSyncError: `confirmBooking failed: ${err.message}`,
+          }).where(eq(schema.appointments.id, appointment.id));
+        }
+      }
 
       return reply.status(201).send({
         success: true,
         appointmentId: appointment.id,
-        message: 'Agendamento registrado! Nossa equipe vai confirmar e entrar em contato.',
+        operationalStatus: confirmedInKlingo ? 'confirmed' : operationalStatus,
+        manualConfirmationRequired: confirmedInKlingo ? false : requiresManualConfirmation,
+        message: confirmedInKlingo
+          ? 'Agendamento confirmado com sucesso no Klingo.'
+          : 'Agendamento registrado, mas a confirmacao no Klingo falhou.',
       });
     } catch (err: any) {
+      if (klingoReservationId && klingoPatientId && klingoExt) {
+        try {
+          await klingoExt.cancelReservation(klingoPatientId, klingoReservationId);
+        } catch (cancelErr: any) {
+          app.log.error({ cancelErr }, '[public-scheduling] failed to cancel Klingo reservation after error');
+        }
+      }
       console.error('[public-scheduling] book error:', err.message);
       return reply.status(500).send({ error: 'Erro ao registrar agendamento. Tente novamente.' });
     }

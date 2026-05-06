@@ -37,6 +37,12 @@ interface PublicSlot {
   professionalId?: string | number;
 }
 
+interface ExtractedExam {
+  name: string;
+  quantity?: number;
+  observations?: string | null;
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 function getTokenFromUrl(): string | null {
@@ -220,6 +226,16 @@ function normalizeText(value: string) {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+function scoreExamMatch(extractedName: string, catalogExam: Exam) {
+  const extracted = normalizeText(extractedName);
+  const catalog = normalizeText(`${catalogExam.name} ${catalogExam.category || ''}`);
+  if (!extracted || !catalog) return 0;
+  if (catalog.includes(extracted) || extracted.includes(normalizeText(catalogExam.name))) return 100;
+  const tokens = extracted.split(/\s+/).filter((token) => token.length > 2);
+  if (tokens.length === 0) return 0;
+  return tokens.filter((token) => catalog.includes(token)).length / tokens.length;
+}
+
 function formatMoney(cents?: number) {
   if (!cents) return 'Valor sob consulta';
   return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`;
@@ -251,12 +267,12 @@ function toBase64(file: File) {
 
 function PublicExamScheduling() {
   const [currentStep, setCurrentStep] = useState<PublicStep>('exams');
-  const [exams, setExams] = useState<Exam[]>(fallbackExams);
-  const [examsSource, setExamsSource] = useState<'klingo' | 'fallback'>('fallback');
-  const [selectedExamIds, setSelectedExamIds] = useState<string[]>(['1431']);
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [examsSource, setExamsSource] = useState<'klingo' | 'none'>('none');
+  const [selectedExamIds, setSelectedExamIds] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [slots, setSlots] = useState<PublicSlot[]>([]);
-  const [slotsSource, setSlotsSource] = useState<'klingo' | 'fallback' | 'none'>('fallback');
+  const [slotsSource, setSlotsSource] = useState<'klingo' | 'none'>('none');
   const [selectedSlotId, setSelectedSlotId] = useState('');
   const [patientName, setPatientName] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
@@ -266,8 +282,14 @@ function PublicExamScheduling() {
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [requestFile, setRequestFile] = useState<File | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
+  const [requestFileName, setRequestFileName] = useState('');
+  const [ocrStatus, setOcrStatus] = useState<'idle' | 'reading' | 'matched' | 'needs-review' | 'error'>('idle');
+  const [ocrMessage, setOcrMessage] = useState('');
+  const [extractedExams, setExtractedExams] = useState<ExtractedExam[]>([]);
   const [loadingExams, setLoadingExams] = useState(true);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [catalogMessage, setCatalogMessage] = useState('');
+  const [slotsMessage, setSlotsMessage] = useState('');
   const [checkingPatient, setCheckingPatient] = useState(false);
   const [patientLookup, setPatientLookup] = useState<'idle' | 'found' | 'not-found'>('idle');
   const [submitting, setSubmitting] = useState(false);
@@ -278,10 +300,18 @@ function PublicExamScheduling() {
     () => exams.filter((exam) => selectedExamIds.includes(String(exam.id))),
     [exams, selectedExamIds],
   );
-  const mainExam = selectedExams[0] || exams[0] || fallbackExams[0];
+  const mainExam = selectedExams[0] || exams[0];
   const selectedSlot = slots.find((slot) => String(slot.klingoSlotId ?? slot.dateTime) === selectedSlotId) || slots[0];
   const totalCents = selectedExams.reduce((sum, exam) => sum + (exam.priceCents || 0), 0);
-  const manualConfirmationRequired = examsSource === 'fallback' || selectedSlot?.source === 'fallback' || slotsSource === 'fallback';
+  const paymentLabel = paymentMethod === 'pix'
+    ? 'Pix'
+    : paymentMethod === 'card'
+      ? 'Cartao'
+      : paymentMethod === 'clinic'
+        ? 'Dinheiro/na unidade'
+        : paymentMethod === 'insurance'
+          ? 'Convenio'
+          : 'Confirmar com atendente';
   const publicSteps: Array<{ id: PublicStep; label: string }> = [
     { id: 'exams', label: 'Exames' },
     { id: 'request', label: 'Pedido' },
@@ -320,14 +350,22 @@ function PublicExamScheduling() {
         if (!alive) return;
         if (Array.isArray(payload.exams) && payload.exams.length > 0) {
           setExams(payload.exams);
-          setExamsSource(payload.source === 'klingo' ? 'klingo' : 'fallback');
+          setExamsSource(payload.source === 'klingo' ? 'klingo' : 'none');
           setSelectedExamIds([String(payload.exams[0].id)]);
+          setCatalogMessage('');
+        } else {
+          setExams([]);
+          setSelectedExamIds([]);
+          setExamsSource('none');
+          setCatalogMessage(payload.error || 'Catalogo de exames indisponivel no Klingo.');
         }
       })
       .catch(() => {
         if (alive) {
-          setExams(fallbackExams);
-          setExamsSource('fallback');
+          setExams([]);
+          setSelectedExamIds([]);
+          setExamsSource('none');
+          setCatalogMessage('Falha ao carregar o catalogo de exames do Klingo.');
         }
       })
       .finally(() => {
@@ -337,7 +375,13 @@ function PublicExamScheduling() {
   }, []);
 
   useEffect(() => {
-    if (!mainExam?.id) return;
+    if (!mainExam?.id) {
+      setSlots([]);
+      setSlotsSource('none');
+      setSelectedSlotId('');
+      setSlotsMessage('Selecione um exame do catalogo do Klingo para consultar horarios online.');
+      return;
+    }
     let alive = true;
     const start = new Date();
     start.setDate(start.getDate() + 1);
@@ -356,14 +400,16 @@ function PublicExamScheduling() {
         const nextSlots = Array.isArray(payload.slots) ? payload.slots : [];
         if (!alive) return;
         setSlots(nextSlots);
-        setSlotsSource(payload.source === 'klingo' ? 'klingo' : payload.source === 'none' ? 'none' : 'fallback');
+        setSlotsSource(payload.source === 'klingo' ? 'klingo' : 'none');
         setSelectedSlotId(nextSlots[0] ? String(nextSlots[0].klingoSlotId ?? nextSlots[0].dateTime) : '');
+        setSlotsMessage(payload.message || (nextSlots.length === 0 ? 'Sem horarios online disponiveis no Klingo para este exame.' : ''));
       })
       .catch(() => {
         if (alive) {
           setSlots([]);
           setSlotsSource('none');
           setSelectedSlotId('');
+          setSlotsMessage('Falha ao consultar horarios online no Klingo.');
         }
       })
       .finally(() => {
@@ -409,6 +455,97 @@ function PublicExamScheduling() {
     }
   };
 
+  const applyExtractedExams = (examsRequested: ExtractedExam[]) => {
+    setExtractedExams(examsRequested);
+    const matchedIds = examsRequested
+      .map((extracted) => {
+        const ranked = exams
+          .map((exam) => ({ exam, score: scoreExamMatch(extracted.name, exam) }))
+          .sort((a, b) => b.score - a.score);
+        const best = ranked[0];
+        return best && best.score >= 0.5 ? String(best.exam.id) : null;
+      })
+      .filter((id): id is string => Boolean(id));
+
+    const uniqueIds = Array.from(new Set(matchedIds));
+    if (uniqueIds.length > 0) {
+      setSelectedExamIds(uniqueIds);
+      setQuery('');
+      setOcrStatus('matched');
+      setOcrMessage(`${uniqueIds.length} exame(s) selecionado(s) automaticamente pelo OCR. Confira antes de continuar.`);
+      return;
+    }
+
+    setOcrStatus('needs-review');
+    setOcrMessage('O OCR leu o pedido, mas nao encontrou correspondencia segura no catalogo. Selecione os exames manualmente.');
+  };
+
+  const handleRequestFile = async (file: File | null) => {
+    setError('');
+    setRequestId(null);
+    setRequestFile(file);
+    setRequestFileName(file?.name || '');
+    setExtractedExams([]);
+
+    if (!file) {
+      setOcrStatus('idle');
+      setOcrMessage('');
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setRequestFile(null);
+      setRequestFileName('');
+      setOcrStatus('error');
+      setOcrMessage('Envie uma imagem do pedido medico em JPG, PNG, GIF ou WEBP.');
+      setError('Arquivo invalido. Envie uma imagem do pedido medico.');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setRequestFile(null);
+      setRequestFileName('');
+      setOcrStatus('error');
+      setOcrMessage('Arquivo maior que 10MB. Tire uma foto mais leve do pedido.');
+      setError('Arquivo maior que 10MB.');
+      return;
+    }
+
+    setOcrStatus('reading');
+    setOcrMessage('Lendo o pedido medico e procurando exames no catalogo...');
+
+    try {
+      const fileBase64 = await toBase64(file);
+      const response = await fetch(`${API_BASE}/api/exam-requests/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientPhone,
+          patientName,
+          fileBase64,
+          mimeType: file.type,
+          fileName: file.name,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Nao foi possivel ler o pedido medico.');
+      }
+
+      setRequestId(payload.requestId || null);
+      const examsRequested = Array.isArray(payload.extraction?.examsRequested)
+        ? payload.extraction.examsRequested
+        : [];
+      if (payload.extraction?.patientName && !patientName) setPatientName(payload.extraction.patientName);
+      if (payload.extraction?.patientCpf && !patientCpf) setPatientCpf(payload.extraction.patientCpf);
+      applyExtractedExams(examsRequested);
+    } catch (err: any) {
+      setOcrStatus('error');
+      setOcrMessage(err.message || 'Nao foi possivel ler o pedido medico. Tente outra foto ou fale pelo WhatsApp.');
+      setError(err.message || 'Nao foi possivel ler o pedido medico.');
+    }
+  };
+
   const uploadRequestIfNeeded = async () => {
     if (!requestFile || requestId) return requestId;
     const fileBase64 = await toBase64(requestFile);
@@ -429,20 +566,24 @@ function PublicExamScheduling() {
     return payload.requestId || null;
   };
 
-  const goToStep = (targetStep: PublicStep) => {
-    setError('');
+  const goToStep = (targetStep: PublicStep, clearCurrentError = true) => {
+    if (clearCurrentError) setError('');
     setCurrentStep(targetStep);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const advanceFrom = (sourceStep: PublicStep) => {
     setError('');
+    if (ocrStatus === 'reading') {
+      setError('Aguarde a leitura OCR do pedido medico.');
+      return;
+    }
     if (sourceStep === 'exams' && selectedExams.length === 0) {
       setError('Selecione pelo menos um exame.');
       return;
     }
-    if (sourceStep === 'request' && !requestFile) {
-      setError('Envie a foto do pedido medico para continuar.');
+    if (sourceStep === 'request' && (!requestFile || !requestId)) {
+      setError('Envie a foto do pedido medico e aguarde a leitura OCR para continuar.');
       return;
     }
     if (sourceStep === 'patient' && (!patientName.trim() || !patientPhone.replace(/\D/g, ''))) {
@@ -461,22 +602,22 @@ function PublicExamScheduling() {
     setError('');
     if (selectedExams.length === 0) {
       setError('Selecione pelo menos um exame.');
-      goToStep('exams');
+      goToStep('exams', false);
       return;
     }
-    if (!requestFile) {
-      setError('Envie a foto do pedido medico para continuar.');
-      goToStep('request');
+    if (!requestFile || !requestId) {
+      setError('Envie a foto do pedido medico e aguarde a leitura OCR para continuar.');
+      goToStep('request', false);
       return;
     }
     if (!patientName.trim() || !patientPhone.replace(/\D/g, '')) {
       setError('Informe nome e telefone do paciente.');
-      goToStep('patient');
+      goToStep('patient', false);
       return;
     }
     if (!selectedSlot) {
       setError('Escolha um horario disponivel.');
-      goToStep('schedule');
+      goToStep('schedule', false);
       return;
     }
 
@@ -505,8 +646,7 @@ function PublicExamScheduling() {
           paymentMethod,
           requestId: uploadedRequestId,
           requestFileName: requestFile?.name,
-          manualConfirmationRequired,
-          schedulingSource: selectedSlot.source || slotsSource,
+          schedulingSource: 'klingo',
         }),
       });
       const payload = await response.json();
@@ -570,16 +710,48 @@ function PublicExamScheduling() {
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-irb-primary" style={{ width: `${progress}%` }} /></div>
               </div>
             </div>
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-5">
+              {publicSteps.map((item, index) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => goToStep(item.id)}
+                  className={`rounded-xl px-2 py-3 text-xs font-black border ${currentStep === item.id ? 'border-irb-primary bg-teal-50 text-irb-primary' : index < currentStepIndex ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-100 bg-gray-50 text-gray-400'}`}
+                >
+                  <span className="block text-[10px] uppercase tracking-widest">Etapa {index + 1}</span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="bg-white rounded-3xl shadow-sm p-6">
+          {currentStep === 'exams' ? <div className="bg-white rounded-3xl shadow-sm p-6">
             <div className="flex items-center justify-between gap-4 mb-4">
               <div>
-                <h2 className="text-lg font-black">1. Exames e pedido medico</h2>
-                <p className="text-sm text-gray-500">{loadingExams ? 'Consultando catalogo Klingo...' : 'Catalogo consultado para busca de exames e precos.'}</p>
+                <h2 className="text-lg font-black">1. Escolha os exames</h2>
+                <p className="text-sm text-gray-500">{loadingExams ? 'Consultando catalogo Klingo...' : 'Envie o pedido para o OCR selecionar os exames, ou ajuste manualmente no catalogo.'}</p>
               </div>
-              <span className="bg-teal-50 text-irb-primary rounded-full px-3 py-1 text-xs font-bold">Klingo</span>
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${examsSource === 'klingo' ? 'bg-teal-50 text-irb-primary' : 'bg-amber-50 text-amber-700'}`}>
+                {examsSource === 'klingo' ? 'Klingo' : 'Confirmacao manual'}
+              </span>
             </div>
+            <label className="mb-4 flex items-center justify-between gap-4 rounded-2xl border border-dashed border-teal-200 bg-teal-50 px-4 py-5 cursor-pointer">
+              <div>
+                <p className="text-sm font-black text-irb-primary">Ler pedido medico com OCR</p>
+                <p className="text-xs text-gray-600 mt-1">{requestFileName || 'Envie foto do pedido para identificar e selecionar os exames automaticamente.'}</p>
+              </div>
+              <span className="bg-irb-primary text-white rounded-xl px-4 py-2 text-sm font-black">{ocrStatus === 'reading' ? 'Lendo...' : 'Enviar foto'}</span>
+              <input className="hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" disabled={ocrStatus === 'reading'} onChange={(event) => handleRequestFile(event.target.files?.[0] || null)} />
+            </label>
+            {ocrMessage ? <div className={`mb-4 rounded-2xl border p-4 text-sm font-semibold ${ocrStatus === 'matched' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : ocrStatus === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{ocrMessage}</div> : null}
+            {extractedExams.length > 0 ? <div className="mb-4 rounded-2xl bg-gray-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Exames lidos no pedido</p>
+              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                {extractedExams.map((exam, index) => (
+                  <li key={`${exam.name}-${index}`} className="font-semibold text-gray-700">{exam.quantity || 1}x {exam.name}</li>
+                ))}
+              </ul>
+            </div> : null}
             <input className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm mb-4" placeholder="Buscar exame por nome..." value={query} onChange={(event) => setQuery(event.target.value)} />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto">
               {visibleExams.map((exam) => {
@@ -598,18 +770,42 @@ function PublicExamScheduling() {
                 );
               })}
             </div>
-            <label className="mt-5 flex items-center justify-between gap-4 rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 cursor-pointer">
+            {examsSource === 'fallback' ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">Os valores exibidos sao estimativas. A equipe IRB confirma valor e disponibilidade antes do atendimento.</div> : null}
+            <div className="flex justify-end mt-5">
+              <button type="button" onClick={() => advanceFrom('exams')} disabled={ocrStatus === 'reading'} className="bg-irb-primary text-white rounded-2xl px-5 py-3 font-black disabled:opacity-50">Continuar para pedido medico</button>
+            </div>
+          </div> : null}
+
+          {currentStep === 'request' ? <div className="bg-white rounded-3xl shadow-sm p-6">
+            <div className="flex items-center justify-between gap-4 mb-4">
               <div>
-                <p className="text-sm font-bold">Enviar foto do pedido medico</p>
+                <h2 className="text-lg font-black">2. Pedido medico</h2>
+                <p className="text-sm text-gray-500">Envie a foto do pedido antes de identificar o paciente.</p>
+              </div>
+              <span className="bg-red-50 text-red-700 rounded-full px-3 py-1 text-xs font-bold">Obrigatorio</span>
+            </div>
+            <label className="flex items-center justify-between gap-4 rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-5 cursor-pointer">
+              <div>
+                <p className="text-sm font-bold">{requestId ? 'Pedido lido pelo OCR' : 'Enviar foto do pedido medico'}</p>
                 <p className="text-xs text-gray-500">{requestFile ? requestFile.name : 'JPG, PNG, GIF ou WEBP ate 10MB'}</p>
               </div>
-              <span className="text-irb-primary font-black">Upload</span>
-              <input className="hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={(event) => setRequestFile(event.target.files?.[0] || null)} />
+              <span className="text-irb-primary font-black">{ocrStatus === 'reading' ? 'Lendo...' : requestId ? 'Trocar foto' : 'Upload'}</span>
+              <input className="hidden" type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" disabled={ocrStatus === 'reading'} onChange={(event) => handleRequestFile(event.target.files?.[0] || null)} />
             </label>
-          </div>
+            {ocrMessage ? <div className={`mt-4 rounded-2xl border p-4 text-sm font-semibold ${ocrStatus === 'matched' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : ocrStatus === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{ocrMessage}</div> : null}
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mt-5">
+              <p className="text-sm font-black text-red-800">Pedido fisico obrigatorio</p>
+              <p className="text-xs text-red-700 mt-1 leading-5">Mesmo enviando foto pelo site, o paciente deve apresentar o pedido medico fisico na recepcao.</p>
+            </div>
+            <div className="flex flex-col sm:flex-row justify-between gap-3 mt-5">
+              <a className="text-center border border-gray-200 rounded-2xl px-5 py-3 font-black text-irb-primary" href="https://wa.me/5511975830513">Nao tenho o pedido</a>
+              <button type="button" onClick={() => advanceFrom('request')} className="bg-irb-primary text-white rounded-2xl px-5 py-3 font-black">Continuar para paciente</button>
+            </div>
+          </div> : null}
 
-          <div className="bg-white rounded-3xl shadow-sm p-6">
-            <h2 className="text-lg font-black">2. Dados do paciente</h2>
+          {currentStep === 'patient' ? <div className="bg-white rounded-3xl shadow-sm p-6">
+            <h2 className="text-lg font-black">3. Dados do paciente</h2>
+            <p className="text-sm text-gray-500 mt-1">Busque por CPF para reaproveitar o cadastro. Se nao encontrar, preencha os dados para validacao.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">CPF</label>
@@ -637,34 +833,102 @@ function PublicExamScheduling() {
                 <input className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} type="date" />
               </div>
             </div>
-          </div>
+            <div className="flex justify-end mt-5">
+              <button type="button" onClick={() => advanceFrom('patient')} className="bg-irb-primary text-white rounded-2xl px-5 py-3 font-black">Continuar para horario</button>
+            </div>
+          </div> : null}
 
-          <div className="bg-white rounded-3xl shadow-sm p-6">
+          {currentStep === 'schedule' ? <div className="bg-white rounded-3xl shadow-sm p-6">
             <div className="flex items-center justify-between gap-4 mb-4">
               <div>
-                <h2 className="text-lg font-black">3. Data e horario</h2>
-                <p className="text-sm text-gray-500">{loadingSlots ? 'Sincronizando agenda Klingo...' : 'Horarios retornados da agenda online.'}</p>
+                <h2 className="text-lg font-black">4. Data e horario</h2>
+                <p className="text-sm text-gray-500">{loadingSlots ? 'Sincronizando agenda Klingo...' : slotsSource === 'klingo' ? 'Horarios integrados ao Klingo.' : 'Escolha uma preferencia de horario para confirmacao manual.'}</p>
               </div>
-              <span className="bg-emerald-50 text-emerald-700 rounded-full px-3 py-1 text-xs font-bold">Tempo real</span>
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${slotsSource === 'klingo' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                {slotsSource === 'klingo' ? 'Tempo real' : 'Preferencia'}
+              </span>
             </div>
             {slots.length === 0 ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">Sem horario online para o exame selecionado. Use o WhatsApp para conferencia manual.</div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {slots.slice(0, 16).map((slot) => {
-                  const id = String(slot.klingoSlotId ?? slot.dateTime);
-                  const active = selectedSlotId === id;
-                  return (
-                    <button key={id} type="button" onClick={() => setSelectedSlotId(id)} className={`border rounded-2xl px-3 py-4 text-center ${active ? 'border-irb-primary bg-teal-50 text-irb-primary' : 'border-gray-200 hover:border-teal-300'}`}>
-                      <p className="text-xs font-bold uppercase tracking-widest">{formatDate(slot.dateTime)}</p>
-                      <p className="text-lg font-black mt-1">{slot.time}</p>
-                      {slot.professional ? <p className="text-[11px] text-gray-500 truncate mt-1">{slot.professional}</p> : null}
-                    </button>
-                  );
-                })}
+              <div className="space-y-4">
+                {groupedSlots.map((group) => (
+                  <div key={group.date}>
+                    <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">{group.label}</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {group.slots.map((slot) => {
+                        const id = String(slot.klingoSlotId ?? slot.dateTime);
+                        const active = selectedSlotId === id;
+                        return (
+                          <button key={id} type="button" onClick={() => setSelectedSlotId(id)} className={`border rounded-2xl px-3 py-4 text-center ${active ? 'border-irb-primary bg-teal-50 text-irb-primary' : 'border-gray-200 hover:border-teal-300'}`}>
+                            <p className="text-lg font-black">{slot.time}</p>
+                            <p className="text-[11px] text-gray-500 mt-1">{slot.source === 'fallback' ? 'Confirmacao manual' : 'Klingo'}</p>
+                            {slot.professional ? <p className="text-[11px] text-gray-500 truncate mt-1">{slot.professional}</p> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-          </div>
+            {manualConfirmationRequired ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">Este horario sera tratado como preferencia ate a equipe IRB validar no Klingo/WorkLab.</div> : null}
+            <div className="flex justify-end mt-5">
+              <button type="button" onClick={() => advanceFrom('schedule')} className="bg-irb-primary text-white rounded-2xl px-5 py-3 font-black">Continuar para pagamento</button>
+            </div>
+          </div> : null}
+
+          {currentStep === 'payment' ? <div className="bg-white rounded-3xl shadow-sm p-6">
+            <h2 className="text-lg font-black">5. Forma de pagamento</h2>
+            <p className="text-sm text-gray-500 mt-1">A forma escolhida sera registrada para triagem financeira. Nao ha cobranca online nesta etapa.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+              {[
+                { id: 'pix', label: 'Pix', help: 'Receber orientacao da equipe.' },
+                { id: 'card', label: 'Cartao', help: 'Registrar intencao de pagar no cartao.' },
+                { id: 'clinic', label: 'Dinheiro/na unidade', help: 'Resolver na recepcao.' },
+                { id: 'insurance', label: 'Convenio', help: 'Equipe confere cobertura.' },
+                { id: 'attendant', label: 'Confirmar com atendente', help: 'Deixar financeiro em aberto.' },
+              ].map((option) => (
+                <button key={option.id} type="button" onClick={() => setPaymentMethod(option.id)} className={`border rounded-2xl p-4 text-left ${paymentMethod === option.id ? 'border-irb-primary bg-teal-50 text-irb-primary' : 'border-gray-200 hover:border-teal-300'}`}>
+                  <p className="font-black">{option.label}</p>
+                  <p className="text-xs text-gray-500 mt-1">{option.help}</p>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end mt-5">
+              <button type="button" onClick={() => advanceFrom('payment')} className="bg-irb-primary text-white rounded-2xl px-5 py-3 font-black">Revisar agendamento</button>
+            </div>
+          </div> : null}
+
+          {currentStep === 'review' ? <div className="bg-white rounded-3xl shadow-sm p-6">
+            <h2 className="text-lg font-black">6. Revisao e confirmacao</h2>
+            <p className="text-sm text-gray-500 mt-1">Confira os dados antes de enviar para a fila operacional IRB.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5 text-sm">
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Paciente</p>
+                <p className="font-black mt-2">{patientName || 'Nao informado'}</p>
+                <p className="text-gray-500">{patientPhone || 'Telefone nao informado'}</p>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Pedido</p>
+                <p className="font-black mt-2">{requestFile?.name || 'Pendente'}</p>
+                <p className="text-gray-500">Fisico obrigatorio na recepcao</p>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Horario</p>
+                <p className="font-black mt-2">{selectedSlot ? `${formatFullDate(selectedSlot.dateTime)} as ${selectedSlot.time}` : 'Nao selecionado'}</p>
+                <p className="text-gray-500">{manualConfirmationRequired ? 'Confirmacao manual' : 'Integrado ao Klingo'}</p>
+              </div>
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Pagamento</p>
+                <p className="font-black mt-2">{paymentLabel}</p>
+                <p className="text-gray-500">Sem cobranca online</p>
+              </div>
+            </div>
+            <div className="flex justify-end mt-5">
+              <button type="button" disabled={submitting} onClick={submitBooking} className="bg-irb-primary text-white rounded-2xl px-5 py-4 font-black disabled:opacity-50">{submitting ? 'Registrando...' : 'Enviar para confirmacao IRB'}</button>
+            </div>
+          </div> : null}
         </section>
 
         <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
@@ -688,17 +952,8 @@ function PublicExamScheduling() {
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Pagamento</p>
-                <div className="grid gap-2 mt-2">
-                  {[
-                    { id: 'pix', label: 'PIX' },
-                    { id: 'card', label: 'Cartao' },
-                    { id: 'clinic', label: 'Pagar na recepcao' },
-                  ].map((option) => (
-                    <button key={option.id} type="button" onClick={() => setPaymentMethod(option.id)} className={`border rounded-xl px-3 py-2 text-left text-sm font-bold ${paymentMethod === option.id ? 'border-irb-primary bg-teal-50 text-irb-primary' : 'border-gray-200'}`}>
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-sm font-bold mt-1">{paymentLabel}</p>
+                <p className="text-xs text-gray-500 mt-1">Sem cobranca online.</p>
               </div>
               <div className="border-t border-gray-100 pt-4 flex justify-between items-center">
                 <span className="font-black">Total</span>
@@ -707,8 +962,12 @@ function PublicExamScheduling() {
             </div>
             <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mt-5">
               <p className="text-sm font-black text-red-800">Pedido fisico obrigatorio</p>
-              <p className="text-xs text-red-700 mt-1 leading-5">Mesmo enviando foto, o paciente deve apresentar o pedido medico fisico na recepcao.</p>
+              <p className="text-xs text-red-700 mt-1 leading-5">{requestFile ? `Foto enviada: ${requestFile.name}` : 'Envie a foto do pedido para liberar o envio.'}</p>
             </div>
+            {manualConfirmationRequired ? <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mt-5">
+              <p className="text-sm font-black text-amber-800">Confirmacao manual</p>
+              <p className="text-xs text-amber-700 mt-1 leading-5">A solicitacao entra na fila `pending_manual_confirmation` para validacao no Klingo/WorkLab.</p>
+            </div> : null}
             <div className="bg-gray-50 rounded-2xl p-4 mt-5">
               <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Orientacoes</p>
               <ul className="space-y-2 text-xs text-gray-600 leading-5">
@@ -718,8 +977,8 @@ function PublicExamScheduling() {
               </ul>
             </div>
             {error ? <p className="mt-4 bg-red-50 text-red-700 rounded-xl px-3 py-2 text-sm font-semibold">{error}</p> : null}
-            <button type="button" disabled={submitting} onClick={submitBooking} className="w-full bg-irb-primary text-white rounded-2xl px-5 py-4 font-black mt-5 disabled:opacity-50">
-              {submitting ? 'Registrando...' : 'Confirmar agendamento'}
+            <button type="button" disabled={submitting} onClick={() => currentStep === 'review' ? submitBooking() : advanceFrom(currentStep)} className="w-full bg-irb-primary text-white rounded-2xl px-5 py-4 font-black mt-5 disabled:opacity-50">
+              {submitting ? 'Registrando...' : currentStep === 'review' ? 'Enviar para confirmacao IRB' : 'Continuar'}
             </button>
             <p className="text-[11px] text-gray-400 text-center leading-5 mt-3">O registro entra no sistema e a equipe valida a confirmacao final com Klingo/WorkLab quando necessario.</p>
           </div>
